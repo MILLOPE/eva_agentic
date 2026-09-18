@@ -8,7 +8,7 @@
 
 评测器自身使用项目内的 `.venv/`。所有框架原生环境或模型环境都应放在 `.envs/eva-*` 下，该目录已被 Git 忽略。这样可以让实验依赖保持在项目内部，同时避免修改共享的 conda 环境。
 
-可以从 [RATs 框架声明示例](examples/rats-libero.frameworks.example.yaml) 和 [本地配置示例](examples/local-profile.example.yaml) 开始。框架声明文件可以安全提交到版本库；本地配置则应先复制到仓库外或被 Git 忽略的位置，再填写路径、密钥和机器相关参数。
+可以从 [RATs 框架声明示例](examples/rats-libero.frameworks.example.yaml) 和 [RPent 本地配置示例](examples/rpent-vllm-user-libero.profile.example.yaml) 开始。框架声明文件可以安全提交到版本库；本地配置则应先复制到仓库外或被 Git 忽略的位置，再填写路径、密钥和机器相关参数。
 
 ## 工作流程
 
@@ -220,7 +220,7 @@ stdout.log、stderr.log、RPent transcript、audit 和 recipe 都保留在 attem
 ### 大规模评测：容量探针
 
 扩容前先量化瓶颈（远端 vLLM/SAM3 吞吐、本地 CPU/EGL 仿真、evidence
-体积），不要直接加大并发。工具都在 `scripts/` 下，纯逻辑在
+体积），不要直接加大并发。纯逻辑在
 `src/eva_agentic/probing.py`，均有单测覆盖。统一通过 `eva-agentic` 这个
 入口调用：`gen-cases` 生成矩阵，`probe` 跑探针。
 
