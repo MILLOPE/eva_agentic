@@ -2,27 +2,33 @@
 
 set -eo pipefail
 
-# Import only the runtime credentials and service endpoints from the existing
-# RPent development env.  In particular, do not let its PYTHONPATH or Python
-# interpreter selectors decide which RPent eva launches.
+# Use the eva-local runtime config: all connection and signing variables come
+# from .envs/eva-rpent-vllm-user/.env (git-ignored), not from an external
+# project.  This env file carries no PYTHONPATH or interpreter selectors, so
+# nothing stale can decide which RPent eva launches.
 repo_root="$(cd -- "$(dirname -- "$0")/.." && pwd)"
-source_env="$RPENT_SOURCE_ENV"
-if [[ -z "$source_env" ]]; then
-  source_env="/share/repos/Rpent-correction/.env.local"
+if [[ -n "$RPENT_SOURCE_ENV" ]]; then
+  source_env="$RPENT_SOURCE_ENV"
+else
+  source_env="$repo_root/.envs/eva-rpent-vllm-user/.env"
 fi
 
 if [[ ! -f "$source_env" ]]; then
-  echo "missing RPent source environment: $source_env" >&2
+  echo "missing eva-local RPent env: $source_env" >&2
+  echo "create it from examples/rpent-vllm-user-libero.env.example:" >&2
+  echo "  mkdir -p \"$repo_root/.envs/eva-rpent-vllm-user\"" >&2
+  echo "  cp examples/rpent-vllm-user-libero.env.example \"$source_env\"" >&2
   exit 2
 fi
 
-# shellcheck disable=SC1090
+# Bring in only the connection/signing variables from the eva-local .env.
 set -a
 source "$source_env"
 set +a
 
-# These values belong to the correction workspace and must not leak into the
-# eva RPent process.  The vLLM credential variables are deliberately retained.
+# Defensive: clear any interpreter/PYTHONPATH selectors a legacy override env
+# might carry, so the eva-local venv always wins.  The vLLM credential
+# variables sourced above are deliberately retained.
 unset \
   PYTHONPATH \
   RPENT_MAIN_PYTHON \

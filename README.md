@@ -67,7 +67,7 @@ cp examples/rpent-vllm-user-libero.profile.example.yaml \
 $EDITOR profiles/rpent-vllm-user-libero.yaml
 ```
 
-通过评测器运行框架原生命令。RPent vllm-user 示例默认使用签名 vLLM 服务；开始运行前需要已有 VLA/SAM3 服务，并通过 `scripts/with-rpent-vllm-user-env.sh` 注入签名变量。
+通过评测器运行框架原生命令。RPent vllm-user 示例默认使用签名 vLLM 服务；开始运行前需要已有 VLA/SAM3 服务，并已通过被 Git 忽略的 eva 本地 `.env`（`.envs/eva-rpent-vllm-user/.env`）配置签名变量。
 
 ```bash
 RUN_DIR="runs/$RUN_ID"
@@ -143,8 +143,8 @@ done
 这些示例只用于进行小规模 smoke 检查，并不代表已经完成真实机器环境下的完整验证。
 
 示例默认使用 vllm-user 的签名 vLLM 服务。签名变量由
-`scripts/with-rpent-vllm-user-env.sh` 从本机 RPent 环境注入，不写入仓库或
-framework 声明；VLA/SAM3 端点放在被 Git 忽略的本地配置中。
+`scripts/with-rpent-vllm-user-env.sh` 从被 Git 忽略的 eva 本地 `.env`（`.envs/eva-rpent-vllm-user/.env`）注入，不写入仓库或
+framework 声明；VLA/SAM3 端点也放在同一个本地 `.env` 中。
 
 当前 eva 使用的 RPent baseline 不注册 `vllm_user` planner；本节的最小 registration patch 和可替换 planner snapshot 会补上这个 native 入口。
 
@@ -152,11 +152,10 @@ framework 声明；VLA/SAM3 端点放在被 Git 忽略的本地配置中。
 
 当前 eva 的 vllm_user 接入使用本仓库内的
 third_party/frameworks/rpent，planner snapshot 和最小 RPent registration
-补丁位于 patches/rpent/libero/vllm_user。/share/repos/Rpent-correction
-只作为迁移来源，不会进入运行时 PYTHONPATH。planner 可以在后续手动替换
-snapshot，但旧 run 目录不会被覆盖。
+补丁位于 patches/rpent/libero/vllm_user，运行时不再依赖任何外部项目。
+planner 可以在后续手动替换 snapshot，但旧 run 目录不会被覆盖。
 
-本机已有的 /share/repos/Rpent-correction/.env.local 同时包含 correction 专用 PYTHONPATH、旧解释器和 vLLM/VLA/SAM3 配置，不能直接 source 后运行 eva。运行时请使用 scripts/with-rpent-vllm-user-env.sh；它只保留认证和服务连接变量，清除旧 Python 路径，并强制 RPENT_REPO_ROOT 和 VIRTUAL_ENV 指向当前 eva。
+运行时的认证与服务连接变量全部来自 eva 本地环境文件 `.envs/eva-rpent-vllm-user/.env`（git-ignored），由 scripts/with-rpent-vllm-user-env.sh 读取；它只保留认证与服务连接变量，清除可能残留的旧 Python 路径，并强制 RPENT_REPO_ROOT 和 VIRTUAL_ENV 指向当前 eva。初始化该本地 `.env` 的方法见下面说明。
 
 如果当前机器没有 CUDA，应在 GPU 主机上执行下面的 eva 命令，或把远端 VLA/SAM3 endpoint 通过 SSH 转发到 profile 中的地址；不要在本机启动 GPU 服务。
 
@@ -171,12 +170,17 @@ planner：
     "$UV" pip install --python "$ENV/bin/python" -e third_party/frameworks/rpent
     "$UV" pip install --python "$ENV/bin/python" -e patches/rpent/libero/vllm_user/planner
 
-复制并填写只存在于本机的 profile。RPENT_VLLM_PRIVATE_KEY 和
-RPENT_VLLM_SIGNER_URL 必须二选一；它们的内容不提交。
+复制并填写只存在于本机的 profile，并初始化 eva 本地 `.env`。RPENT_VLLM_PRIVATE_KEY 和
+RPENT_VLLM_SIGNER_URL 必须二选一；它们的内容不提交：
 
     cp examples/rpent-vllm-user-libero.profile.example.yaml \
       profiles/rpent-vllm-user-libero.yaml
     $EDITOR profiles/rpent-vllm-user-libero.yaml
+
+    mkdir -p .envs/eva-rpent-vllm-user
+    cp examples/rpent-vllm-user-libero.env.example \
+      .envs/eva-rpent-vllm-user/.env
+    $EDITOR .envs/eva-rpent-vllm-user/.env
 
 运行 smoke 前依次检查 planner 来源、native CLI、signed vLLM、VLA 和
 SAM3。VLA/SAM3 使用 RPent JSON-RPC 的 /call healthz，而不是普通
