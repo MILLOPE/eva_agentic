@@ -543,6 +543,10 @@ def _render_charts_seaborn(rows: Sequence[Mapping[str, Any]], directory: Path) -
             "savefig.dpi": 300,
         },
     )
+    for stale_name in ("success_rate.svg", "status_heatmap.svg", "duration.svg"):
+        stale_path = directory / stale_name
+        if stale_path.is_file():
+            stale_path.unlink()
     paths, records = _render_stresskit(rows, directory)
     _save_figure_manifest(directory, records)
     plt.close("all")
@@ -721,8 +725,8 @@ def _render_stresskit(rows: Sequence[Mapping[str, Any]], directory: Path) -> tup
     # --- 04 planned-trial outcome composition (all statuses, complete denominator) ---
     if metrics["suites"]:
         cells = sorted(metrics["suites"], key=lambda x: (x["suite_id"], x["participant"]), reverse=True)
-        fig, ax = plt.subplots(figsize=(7.2, max(3.0, .62 * len(cells) + 1.4)))
-        fig.subplots_adjust(left=.30, right=.97, bottom=.27, top=.86)
+        fig, ax = plt.subplots(figsize=(7.2, max(3.4, .72 * len(cells) + 1.8)))
+        fig.subplots_adjust(left=.30, right=.97, bottom=.34, top=.84)
         _header_footer(fig, "Planned-trial outcome composition",
                        "each bar = all planned trials for one suite-participant cell",
                        "A complete denominator is retained: success, task failure, timeout, infra, invalid, unstarted.",
@@ -735,10 +739,12 @@ def _render_stresskit(rows: Sequence[Mapping[str, Any]], directory: Path) -> tup
                 continue
             start = 0.0
             for status, color in zip(STATUS_LEGEND_ORDER, style["status_colors"]):
+                count = m["status_counts"].get(status, 0)
                 v = 100.0 * m["status_counts"].get(status, 0) / m["planned"]
                 ax.add_patch(Rectangle((start, i), v, .68, facecolor=color, linewidth=0))
                 if v >= 12:
-                    ax.text(start + v / 2, i + .34, f"{v:.0f}", ha="center", va="center", fontsize=6.9)
+                    ax.text(start + v / 2, i + .34, f"{count} ({v:.0f}%)", ha="center", va="center",
+                            fontsize=6.9, color=style["ink"])
                 start += v
         ax.set_xlim(-1, 102); ax.set_ylim(len(cells) + .4, -.8); ax.set_yticks([])
         ax.set_xticks([0, 25, 50, 75, 100])
@@ -748,7 +754,7 @@ def _render_stresskit(rows: Sequence[Mapping[str, Any]], directory: Path) -> tup
         from matplotlib.patches import Patch
         handles = [Patch(facecolor=style["status_colors"][i], label=STATUS_NAMES[s])
                    for i, s in enumerate(STATUS_LEGEND_ORDER)]
-        fig.legend(handles=handles, ncol=2, loc="lower center", bbox_to_anchor=(.5, .045),
+        fig.legend(handles=handles, ncol=3, loc="lower center", bbox_to_anchor=(.5, .055),
                    frameon=False, fontsize=7, handlelength=1.3, handletextpad=.7,
                    columnspacing=2.8, labelspacing=.7)
         paths["03_outcomes"] = _save_fig(fig, directory / "03_outcomes", pdf, records, "03_outcomes", "outcomes", cells=len(cells))
@@ -837,6 +843,63 @@ def _render_stresskit(rows: Sequence[Mapping[str, Any]], directory: Path) -> tup
             paths[f"04_tasks_{gkey[0]}__{gkey[1]}__p{pi + 1}"] = _save_fig(
                 fig, directory / f"04_tasks_{gkey[0]}__{gkey[1]}__p{pi + 1}", pdf, records,
                 "04_tasks", "task_page", suite_id=gkey[0], participant=gkey[1], page=pi + 1, task_count=n)
+
+    # --- 06 master table: per-case evidence in a publication-ready paginated table ---
+    if rows:
+        ordered_rows = sorted(
+            rows,
+            key=lambda r: (suite_of(r), str(r.get("participant")), _task_sort_key(r.get("task_id")),
+                           int(r.get("seed") or 0), str(r.get("case_id"))),
+        )
+        table_columns = ["Suite", "Task", "Seed", "Status", "Duration (s)", "Rounds", "Tools", "Failure reason"]
+        widths = [.135, .125, .055, .105, .105, .075, .075, .325]
+        pages = pages_for(ordered_rows, page_size=14)
+        status_index = {status: i for i, status in enumerate(STATUS_LEGEND_ORDER)}
+        for page_number, page_rows in enumerate(pages, start=1):
+            n = len(page_rows)
+            fig, ax = plt.subplots(figsize=(7.2, 2.55 + .20 * n))
+            fig.subplots_adjust(left=.035, right=.985, bottom=.085, top=.845)
+            _header_footer(fig, "Master case table",
+                           f"selected terminal attempts  /  page {page_number}/{len(pages)}  /  {n} cases",
+                           "Duration is selected-attempt process duration. Missing process metrics are not imputed as zero; "
+                           "full unrounded values remain in case_metrics.csv.", synthetic=False)
+            cell_text = []
+            for row in page_rows:
+                duration = row.get("duration_s")
+                rounds = row.get("planner_rounds")
+                tools = row.get("tool_calls")
+                reason = str(row.get("failure_reason") or "")
+                cell_text.append([
+                    suite_of(row),
+                    _short_task(row.get("task_id")),
+                    str(row.get("seed")),
+                    STATUS_NAMES.get(str(row.get("status")), str(row.get("status") or "—")),
+                    f"{float(duration):.1f}" if isinstance(duration, (int, float)) else "—",
+                    str(rounds if rounds is not None else "—"),
+                    str(tools if tools is not None else "—"),
+                    (reason[:42] + "…") if len(reason) > 43 else (reason or "—"),
+                ])
+            table = ax.table(cellText=cell_text, colLabels=table_columns, colWidths=widths,
+                             cellLoc="center", loc="center")
+            table.auto_set_font_size(False)
+            table.set_fontsize(6.4)
+            table.scale(1, 1.32)
+            for column, _ in enumerate(table_columns):
+                header_cell = table[(0, column)]
+                header_cell.set_facecolor(style["soft"])
+                header_cell.set_edgecolor(style["line"])
+                header_cell.set_text_props(weight="bold")
+            for row_index, row in enumerate(page_rows, start=1):
+                status = str(row.get("status") or "unstarted")
+                if status in status_index:
+                    table[(row_index, 3)].set_facecolor(style["status_colors"][status_index[status]])
+                for column in range(len(table_columns)):
+                    table[(row_index, column)].set_edgecolor(style["line"])
+            ax.axis("off")
+            suffix = f"__p{page_number:02d}" if len(pages) > 1 else ""
+            paths[f"06_master_table{suffix}"] = _save_fig(
+                fig, directory / f"06_master_table{suffix}", pdf, records, "06_master_table", "table",
+                page=page_number, pages=len(pages), rows=len(page_rows))
     pdf.close()
     return paths, records
 

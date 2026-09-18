@@ -287,6 +287,8 @@ PNG/SVG/PDF，并汇总成 `all_figures.pdf`）：
   分页（默认每页 24），长任务列表自动分页。
 - `05_process_metrics`：每个 selected attempt 的 planner 轮数与 tool 调用
   负载，并在标签中展示 tool errors；缺失指标不填成零。
+- `06_master_table`：按 case 汇总的发表级表格图，覆盖 suite/task/seed、
+  状态、耗时、planner 轮数、tool 调用和失败原因；行数多时自动分页。
 
 报告嵌入状态图例、coverage 语义说明（valid = success/task_failure/timeout；
 unknown = infra/invalid/unstarted；零有效结果显示 `P` 而非 0%）与紧凑 JSON
