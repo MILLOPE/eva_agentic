@@ -1,0 +1,5 @@
+{"action": "segment", "prompt": "the ranch dressing bottle", "camera": "agentview"}
+{"action": "segment", "prompt": "the basket", "camera": "agentview"}
+{"action": "move_to", "xyz": [0.0665, -0.099, 0.15], "gripper": -1}
+{"action": "pi0_pick", "prompt": "pick up the salad dressing bottle", "max_chunks": 20, "lift_thresh": 0.05, "gripper_closed_thresh": 0.06}
+{"action": "release"}

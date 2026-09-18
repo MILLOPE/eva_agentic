@@ -1,0 +1,20 @@
+{
+  "suite": "libero_object",
+  "task_id": 2,
+  "seed": 0,
+  "regime": "strict_perception",
+  "task_language": "pick up the salad dressing and place it in the basket",
+  "strategy_notes": "Localized salad dressing using SAM3 segment prompt 'the ranch dressing bottle' (score 0.922, world_xyz [0.0665, -0.099, 0.0712]). Localized basket using SAM3 segment prompt 'the basket' (score 0.875, world_xyz [0.0578, 0.2651, 0.0946]). Executed pi0_pick with prompt 'pick up the salad dressing bottle'. The pick succeeded (lift_thresh met, gripper closed). Carried to basket and released. Task terminated successfully.",
+  "pick_result": {
+    "success": true,
+    "chunks_used": 20,
+    "peak_lift_m": 0.2453
+  },
+  "final_state": {
+    "robot0_eef_pos": [0.006437112922003515, 0.25807179516007656, 0.20219403580056622],
+    "robot0_eef_quat": [0.9989295878193591, 0.007094906842238957, -0.004496593573394304, -0.04548759745446896],
+    "robot0_gripper_qpos": [0.022883181148288436, -0.02267972529384004],
+    "object_names": ["alphabet_soup_1", "basket_1", "cream_cheese_1", "ketchup_1", "milk_1", "salad_dressing_1", "tomato_sauce_1"]
+  },
+  "terminated": true
+}

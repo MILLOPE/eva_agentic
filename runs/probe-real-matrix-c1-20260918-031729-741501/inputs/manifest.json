@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "files": [
+    {
+      "path": "cases.jsonl",
+      "size": 972,
+      "algorithm": "sha256",
+      "sha256": "a035ef95d861f78410643c471e77e3e780cb8bfee6f08249c8fe5eb2687e337d"
+    },
+    {
+      "path": "experiment.resolved.json",
+      "size": 638,
+      "algorithm": "sha256",
+      "sha256": "be282bfb5f87faf9fe7084b8db11c3fe693481f4e4864365aeb07ad698e98e1d"
+    },
+    {
+      "path": "plan.json",
+      "size": 2333,
+      "algorithm": "sha256",
+      "sha256": "2abaef48045f5f2fb3fb7f4d9724d161373a3655907c9d28af425d1d4ac2c8bb"
+    }
+  ]
+}

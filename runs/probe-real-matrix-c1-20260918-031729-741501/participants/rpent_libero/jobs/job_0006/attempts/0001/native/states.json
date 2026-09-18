@@ -1,0 +1,54 @@
+{
+  "run_artifacts": [],
+  "steps": [
+    {
+      "step_idx": 0,
+      "state": {
+        "robot0_eef_pos": [
+          -0.1485467518154309,
+          -0.01896595767254937,
+          0.2559085018490415
+        ],
+        "robot0_eef_quat": [
+          0.9993456500956206,
+          -0.0047437469968892865,
+          -0.03565164907817697,
+          0.003837762029707462
+        ],
+        "robot0_gripper_qpos": [
+          0.039030461986691856,
+          -0.03904869481494241
+        ],
+        "object_names": [
+          "basket_1",
+          "bbq_sauce_1",
+          "butter_1",
+          "chocolate_pudding_1",
+          "ketchup_1",
+          "orange_juice_1",
+          "salad_dressing_1"
+        ]
+      },
+      "terminated": false,
+      "truncated": false,
+      "artifacts": [
+        "agentview.png",
+        "agentview_depth.npz",
+        "agentview_high.png",
+        "agentview_metadata.json",
+        "agentview_policy.png",
+        "agentview_world.npz",
+        "agentview_world_high.npz",
+        "wrist.png",
+        "wrist_depth.npz",
+        "wrist_high.png",
+        "wrist_metadata.json",
+        "wrist_world.npz",
+        "wrist_world_high.npz"
+      ],
+      "extras": {
+        "task_language": "pick up the orange juice and place it in the basket"
+      }
+    }
+  ]
+}

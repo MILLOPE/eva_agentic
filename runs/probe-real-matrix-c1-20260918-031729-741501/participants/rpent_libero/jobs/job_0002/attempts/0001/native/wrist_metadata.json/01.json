@@ -1,0 +1,51 @@
+{
+  "camera_name": "robot0_eye_in_hand",
+  "height": 256,
+  "width": 256,
+  "intrinsic_K": [
+    [
+      166.81284772367434,
+      0.0,
+      128.0
+    ],
+    [
+      0.0,
+      166.81284772367434,
+      128.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "extrinsic_cam2world": [
+    [
+      -0.012731983248852441,
+      -0.9998498093951769,
+      -0.01175819947850204,
+      0.10288026189865426
+    ],
+    [
+      -0.9998334595899492,
+      0.01257625381866695,
+      0.0132246332379608,
+      -0.10106646755281011
+    ],
+    [
+      -0.01307477292120409,
+      0.011924617071997386,
+      -0.9998434146508852,
+      0.2955898415098738
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "depth_near": 0.01060981611847304,
+  "depth_far": 530.490780726692,
+  "note": "MOVING camera: extrinsic_cam2world is for THIS step only. The matching wrist world-map observation gives world (x,y,z) for that pixel in the same world frame as the agentview world-map artifact."
+}

@@ -1,0 +1,52 @@
+{
+  "camera_name": "agentview",
+  "height": 256,
+  "width": 256,
+  "intrinsic_K": [
+    [
+      309.01933598375615,
+      0.0,
+      128.0
+    ],
+    [
+      0.0,
+      309.01933598375615,
+      128.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "extrinsic_cam2world": [
+    [
+      -1.7233905013069872e-06,
+      0.5287697435529835,
+      -0.8487653140297038,
+      0.8965773716836134
+    ],
+    [
+      0.9999999999985034,
+      7.823149652530503e-07,
+      -1.5430955956352577e-06,
+      5.216182733499864e-07
+    ],
+    [
+      -1.5194045527300304e-07,
+      -0.848765314031093,
+      -0.5287697435535403,
+      0.65
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "depth_near": 0.01060981611847304,
+  "depth_far": 530.490780726692,
+  "projection": "Prefer the back_project(row, col, step=NN) MCP tool; it uses the 1024x1024 high-resolution world map by default. Pass resolution='low' only when row/col came from the 256x256 calibration-frame image.",
+  "note": "The agentview_depth.npz observation is aligned with agentview.png. agentview_policy.png uses the Pi0 orientation and must not supply pixels for back-projection."
+}

@@ -1,0 +1,54 @@
+{
+  "run_artifacts": [],
+  "steps": [
+    {
+      "step_idx": 0,
+      "state": {
+        "robot0_eef_pos": [
+          -0.14395121089125598,
+          -0.000638382067043437,
+          0.2505279564859273
+        ],
+        "robot0_eef_quat": [
+          0.999580050400213,
+          0.010463265693987256,
+          -0.02699300560305839,
+          -0.001273012739952676
+        ],
+        "robot0_gripper_qpos": [
+          0.039042941874923145,
+          -0.03903624235008505
+        ],
+        "object_names": [
+          "basket_1",
+          "bbq_sauce_1",
+          "butter_1",
+          "chocolate_pudding_1",
+          "milk_1",
+          "orange_juice_1",
+          "tomato_sauce_1"
+        ]
+      },
+      "terminated": false,
+      "truncated": false,
+      "artifacts": [
+        "agentview.png",
+        "agentview_depth.npz",
+        "agentview_high.png",
+        "agentview_metadata.json",
+        "agentview_policy.png",
+        "agentview_world.npz",
+        "agentview_world_high.npz",
+        "wrist.png",
+        "wrist_depth.npz",
+        "wrist_high.png",
+        "wrist_metadata.json",
+        "wrist_world.npz",
+        "wrist_world_high.npz"
+      ],
+      "extras": {
+        "task_language": "pick up the tomato sauce and place it in the basket"
+      }
+    }
+  ]
+}

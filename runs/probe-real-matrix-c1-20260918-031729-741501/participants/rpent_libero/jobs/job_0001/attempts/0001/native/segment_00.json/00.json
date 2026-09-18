@@ -1,0 +1,34 @@
+{
+  "found": true,
+  "mode": "text",
+  "camera": "agentview",
+  "source_step": 0,
+  "segment_index": 0,
+  "image_artifact": "agentview_high.png",
+  "min_score": 0.2,
+  "score": 0.922,
+  "box": [
+    354.43572998046875,
+    477.08203125,
+    430.66766357421875,
+    647.197021484375
+  ],
+  "mask_shape": [
+    1024,
+    1024
+  ],
+  "prompt": "the ranch dressing bottle",
+  "centroid_pixel": [
+    390,
+    575
+  ],
+  "n_pixels": 9315,
+  "n_valid": 9315,
+  "mask_resized_to_world_shape": false,
+  "world_xyz": [
+    0.0665,
+    -0.099,
+    0.0712
+  ],
+  "world_artifact": "agentview_world_high.npz"
+}

@@ -1,0 +1,11 @@
+I [agent] physical agent cmd: /share/repos/eva_agentic/.envs/eva-rpent-vllm-user/bin/python /share/repos/eva_agentic/third_party/frameworks/rpent/rpent/cli/main.py --planner vllm_user --model default --memory-profile local --memory-dir /share/repos/eva_agentic/.assets/rpent-memory/libero-smoke-salad --max-turns 80 --planner-timeout-s 1200 --reasoning-effort high --robot libero --suite libero_object --task 2 --seed 0 --max-episode-steps 500 --output-dir /share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0001/attempts/0001/native --vla-endpoint 127.0.0.1:18115 --sam3-endpoint 127.0.0.1:18114
+I [agent] memory: using local local profile
+I [daemon] env_server spawned (pid=486241)
+[93mW[0m [env_state] failed to save artifact episode.mp4: Could not find a backend to open `/share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0001/attempts/0001/native/.episode.tmp.mp4`` with iomode `wI`.
+Based on the extension, the following plugins might add capable backends:
+  FFMPEG:  pip install imageio[ffmpeg]
+  pyav:  pip install imageio[pyav]
+I [agent] recipe: object_t2_s0_recipe.jsonl
+I [agent] elapsed: 82.2s
+I [agent] usage: in=330136 out=4574 tool_calls=13
+I [agent] transcript: /share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0001/attempts/0001/native/transcript_object_t2_s0.json

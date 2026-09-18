@@ -1,0 +1,6 @@
+{
+  "artifact": "eva-agentic visualize",
+  "renderer": "seaborn",
+  "plot_env": "eva-viz",
+  "created_utc": "2026-09-18T04:07:01+00:00"
+}

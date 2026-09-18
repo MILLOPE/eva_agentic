@@ -1,0 +1,59 @@
+{
+  "participant": "rpent_libero",
+  "job_id": "job_0002",
+  "attempt_id": 1,
+  "status": "completed",
+  "process": {
+    "native_status": "completed",
+    "exit_code": 0,
+    "duration_s": 275.2562462477945,
+    "pid": 490297,
+    "terminated": false,
+    "launch": "/share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0002/attempts/0001/launch.json",
+    "runtime": "/share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0002/attempts/0001/runtime.json",
+    "stdout": "/share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0002/attempts/0001/stdout.log",
+    "stderr": "/share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0002/attempts/0001/stderr.log",
+    "allocated_resources": [
+      {
+        "kind": "gpu",
+        "slot": 0,
+        "lock_path": "runs/probe-real-matrix-c1-20260918-031729-741501/.eva/resources/gpu/0.lock"
+      }
+    ]
+  },
+  "results": [
+    {
+      "case_id": "libero_object:t2:s1",
+      "status": "success",
+      "task_success": true,
+      "termination_reason": null,
+      "error_source": null,
+      "success_source": "rpent.audit.terminated",
+      "requested_conditions": {
+        "suite": "libero_object",
+        "task_id": 2,
+        "seed": 1,
+        "max_episode_steps": 500,
+        "vla_service": "external",
+        "sam3_service": "external"
+      },
+      "effective_conditions": {
+        "suite": "libero_object",
+        "task_id": 2,
+        "seed": 1,
+        "max_episode_steps": 500,
+        "vla_service": "external",
+        "sam3_service": "external",
+        "regime": "strict_perception"
+      },
+      "metrics": {
+        "native_exit_code": 0,
+        "native_truncated": null
+      },
+      "evidence_paths": [
+        "runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0002/attempts/0001/native/object_t2_s1.json",
+        "runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0002/attempts/0001/native/object_t2_s1_recipe.jsonl"
+      ]
+    }
+  ]
+}

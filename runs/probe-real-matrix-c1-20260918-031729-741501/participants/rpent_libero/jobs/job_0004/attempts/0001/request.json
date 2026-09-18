@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "attempt_id": 1,
+  "job": {
+    "job_id": "job_0004",
+    "participant": "rpent_libero",
+    "cases": [
+      {
+        "case_id": "libero_object:t5:s1",
+        "task_id": "libero_object:5",
+        "seed": 1,
+        "initialization": {
+          "suite": "libero_object",
+          "task_id": 5,
+          "max_episode_steps": 500
+        }
+      }
+    ]
+  },
+  "request": {
+    "allocated_resources": [
+      {
+        "kind": "gpu",
+        "slot": 0,
+        "lock_path": "runs/probe-real-matrix-c1-20260918-031729-741501/.eva/resources/gpu/0.lock"
+      }
+    ]
+  }
+}

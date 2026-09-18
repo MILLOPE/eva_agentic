@@ -1,0 +1,34 @@
+{
+  "found": true,
+  "mode": "text",
+  "camera": "agentview",
+  "source_step": 0,
+  "segment_index": 0,
+  "image_artifact": "agentview_high.png",
+  "min_score": 0.2,
+  "score": 0.859,
+  "box": [
+    363.1849670410156,
+    476.5625,
+    411.3529968261719,
+    538.0130615234375
+  ],
+  "mask_shape": [
+    1024,
+    1024
+  ],
+  "prompt": "the green cap bottle",
+  "centroid_pixel": [
+    387,
+    507
+  ],
+  "n_pixels": 2553,
+  "n_valid": 2553,
+  "mask_resized_to_world_shape": false,
+  "world_xyz": [
+    0.063,
+    -0.0992,
+    0.1359
+  ],
+  "world_artifact": "agentview_world_high.npz"
+}

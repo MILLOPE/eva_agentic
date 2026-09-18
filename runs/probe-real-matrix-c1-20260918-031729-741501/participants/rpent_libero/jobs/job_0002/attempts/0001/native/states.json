@@ -1,0 +1,217 @@
+{
+  "run_artifacts": [],
+  "steps": [
+    {
+      "step_idx": 0,
+      "state": {
+        "robot0_eef_pos": [
+          -0.1555492631802616,
+          0.003121154945584006,
+          0.26461973099626457
+        ],
+        "robot0_eef_quat": [
+          0.9992416415030376,
+          -0.007473965767145707,
+          -0.03642150785068245,
+          -0.011565270766725814
+        ],
+        "robot0_gripper_qpos": [
+          0.03906394006088066,
+          -0.039015241649478234
+        ],
+        "object_names": [
+          "alphabet_soup_1",
+          "basket_1",
+          "cream_cheese_1",
+          "ketchup_1",
+          "milk_1",
+          "salad_dressing_1",
+          "tomato_sauce_1"
+        ]
+      },
+      "terminated": false,
+      "truncated": false,
+      "artifacts": [
+        "agentview.png",
+        "agentview_depth.npz",
+        "agentview_high.png",
+        "agentview_metadata.json",
+        "agentview_policy.png",
+        "agentview_world.npz",
+        "agentview_world_high.npz",
+        "segment_00.json",
+        "segment_overlay_00.png",
+        "wrist.png",
+        "wrist_depth.npz",
+        "wrist_high.png",
+        "wrist_metadata.json",
+        "wrist_world.npz",
+        "wrist_world_high.npz"
+      ],
+      "extras": {
+        "task_language": "pick up the salad dressing and place it in the basket"
+      }
+    },
+    {
+      "step_idx": 1,
+      "state": {
+        "robot0_eef_pos": [
+          0.05155502521955911,
+          -0.09915224753349912,
+          0.19918745100018528
+        ],
+        "robot0_eef_quat": [
+          0.9999410727116009,
+          -0.00633024393973064,
+          -0.00588282699918877,
+          -0.0065704994127104175
+        ],
+        "robot0_gripper_qpos": [
+          0.03979996533356565,
+          -0.03979268401173495
+        ],
+        "object_names": [
+          "alphabet_soup_1",
+          "basket_1",
+          "cream_cheese_1",
+          "ketchup_1",
+          "milk_1",
+          "salad_dressing_1",
+          "tomato_sauce_1"
+        ]
+      },
+      "terminated": false,
+      "truncated": false,
+      "artifacts": [
+        "agentview.png",
+        "agentview_depth.npz",
+        "agentview_high.png",
+        "agentview_metadata.json",
+        "agentview_policy.png",
+        "agentview_world.npz",
+        "agentview_world_high.npz",
+        "wrist.png",
+        "wrist_depth.npz",
+        "wrist_high.png",
+        "wrist_metadata.json",
+        "wrist_world.npz",
+        "wrist_world_high.npz"
+      ],
+      "command": {
+        "action": "move_to",
+        "xyz": [
+          0.063,
+          -0.0992,
+          0.2
+        ],
+        "gripper": -1,
+        "step_clip": 0.025,
+        "max_steps": 80
+      },
+      "result": {
+        "name": "move_to",
+        "target_xyz": [
+          0.06300000101327896,
+          -0.09920000284910202,
+          0.20000000298023224
+        ],
+        "final_eef_pos": [
+          0.0516,
+          -0.0992,
+          0.1992
+        ],
+        "final_dist_m": 0.0115,
+        "steps_used": 36,
+        "max_steps": 80,
+        "terminated": false,
+        "truncated": false
+      },
+      "elapsed_s": 1.11,
+      "extras": {
+        "task_language": "pick up the salad dressing and place it in the basket"
+      }
+    },
+    {
+      "step_idx": 2,
+      "state": {
+        "robot0_eef_pos": [
+          0.02296292953490001,
+          0.23110926683702934,
+          0.20784868503987602
+        ],
+        "robot0_eef_quat": [
+          0.9982352611892295,
+          0.027772410202374698,
+          -0.026207193743753025,
+          -0.04547790173367739
+        ],
+        "robot0_gripper_qpos": [
+          0.022902078997870817,
+          -0.022665123816198986
+        ],
+        "object_names": [
+          "alphabet_soup_1",
+          "basket_1",
+          "cream_cheese_1",
+          "ketchup_1",
+          "milk_1",
+          "salad_dressing_1",
+          "tomato_sauce_1"
+        ]
+      },
+      "terminated": true,
+      "truncated": false,
+      "artifacts": [
+        "agentview.png",
+        "agentview_depth.npz",
+        "agentview_high.png",
+        "agentview_metadata.json",
+        "agentview_policy.png",
+        "agentview_world.npz",
+        "agentview_world_high.npz",
+        "wrist.png",
+        "wrist_depth.npz",
+        "wrist_high.png",
+        "wrist_metadata.json",
+        "wrist_world.npz",
+        "wrist_world_high.npz"
+      ],
+      "command": {
+        "action": "pi0_pick",
+        "prompt": "pick up the salad dressing",
+        "max_chunks": 20,
+        "lift_thresh": 0.05,
+        "gripper_closed_thresh": 0.06
+      },
+      "result": {
+        "name": "pick",
+        "instruction": "pick up the salad dressing",
+        "success": true,
+        "chunks_used": 20,
+        "max_chunks": 20,
+        "peak_lift_m": 0.24198416620492935,
+        "min_gripper_opening": 0.03681254759430885,
+        "final_gripper_opening": 0.04556720331311226,
+        "terminated": true,
+        "truncated": false,
+        "diagnostics": {
+          "start_eef_z": 0.1992,
+          "peak_eef_z": 0.3564,
+          "min_eef_z": 0.1144,
+          "post_min_peak_z": 0.3564,
+          "descent_m": 0.0848,
+          "post_min_ascent_m": 0.242,
+          "descent_done": false,
+          "lift_thresh": 0.05,
+          "gripper_closed_thresh": 0.06,
+          "gripper_open_thresh": 0.0,
+          "descent_thresh": 0.1
+        }
+      },
+      "elapsed_s": 6.24,
+      "extras": {
+        "task_language": "pick up the salad dressing and place it in the basket"
+      }
+    }
+  ]
+}

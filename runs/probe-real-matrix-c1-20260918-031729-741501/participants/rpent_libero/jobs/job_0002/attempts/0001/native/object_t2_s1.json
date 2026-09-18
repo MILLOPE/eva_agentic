@@ -1,0 +1,18 @@
+{
+  "suite": "libero_object",
+  "task_id": 2,
+  "seed": 1,
+  "regime": "strict_perception",
+  "task_language": "pick up the salad dressing and place it in the basket",
+  "terminated": true,
+  "strategy_notes": "Localized salad dressing using SAM3 segment prompt 'the green cap bottle' in agentview. Back-projected to world xyz [0.063, -0.0992, 0.1359]. Moved to pre-pick position and executed pi0_pick('pick up the salad dressing'). Pi0 successfully grasped and placed the bottle into the basket, terminating the task.",
+  "pick_result": {
+    "success": true,
+    "chunks_used": 20,
+    "peak_lift_m": 0.242
+  },
+  "final_state": {
+    "robot0_eef_pos": [0.02296292953490001, 0.23110926683702934, 0.20784868503987602],
+    "robot0_gripper_qpos": [0.022902078997870817, -0.022665123816198986]
+  }
+}

@@ -1,0 +1,7 @@
+I [agent] physical agent cmd: /share/repos/eva_agentic/.envs/eva-rpent-vllm-user/bin/python /share/repos/eva_agentic/third_party/frameworks/rpent/rpent/cli/main.py --planner vllm_user --model default --memory-profile local --memory-dir /share/repos/eva_agentic/.assets/rpent-memory/libero-smoke-salad --max-turns 80 --planner-timeout-s 1200 --reasoning-effort high --robot libero --suite libero_object --task 9 --seed 1 --max-episode-steps 500 --output-dir /share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0006/attempts/0001/native --vla-endpoint 127.0.0.1:18115 --sam3-endpoint 127.0.0.1:18114
+I [agent] memory: using local local profile
+I [daemon] env_server spawned (pid=495811)
+I [agent] recipe: not written (cell unsolved)
+I [agent] elapsed: 15.6s
+I [agent] usage: in=55692 out=1040 tool_calls=4
+I [agent] transcript: /share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0006/attempts/0001/native/transcript_object_t9_s1.json

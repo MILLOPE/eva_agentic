@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "status": "completed",
+  "pid": 495279,
+  "exit_code": 1,
+  "terminated": false,
+  "duration_s": 53.67133996728808,
+  "stdout": "/share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0005/attempts/0001/stdout.log",
+  "stderr": "/share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0005/attempts/0001/stderr.log",
+  "allocated_resources": [
+    {
+      "kind": "gpu",
+      "slot": 0,
+      "lock_path": "runs/probe-real-matrix-c1-20260918-031729-741501/.eva/resources/gpu/0.lock"
+    }
+  ],
+  "extra": {}
+}

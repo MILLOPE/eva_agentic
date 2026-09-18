@@ -1,0 +1,56 @@
+{
+  "participant": "rpent_libero",
+  "job_id": "job_0006",
+  "attempt_id": 1,
+  "status": "completed",
+  "process": {
+    "native_status": "completed",
+    "exit_code": 1,
+    "duration_s": 29.868803692050278,
+    "pid": 495747,
+    "terminated": false,
+    "launch": "/share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0006/attempts/0001/launch.json",
+    "runtime": "/share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0006/attempts/0001/runtime.json",
+    "stdout": "/share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0006/attempts/0001/stdout.log",
+    "stderr": "/share/repos/eva_agentic/runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0006/attempts/0001/stderr.log",
+    "allocated_resources": [
+      {
+        "kind": "gpu",
+        "slot": 0,
+        "lock_path": "runs/probe-real-matrix-c1-20260918-031729-741501/.eva/resources/gpu/0.lock"
+      }
+    ]
+  },
+  "results": [
+    {
+      "case_id": "libero_object:t9:s1",
+      "status": "task_failure",
+      "task_success": false,
+      "termination_reason": "native RPent reported cell unsolved",
+      "error_source": "rpent.task",
+      "success_source": null,
+      "requested_conditions": {
+        "suite": "libero_object",
+        "task_id": 9,
+        "seed": 1,
+        "max_episode_steps": 500,
+        "vla_service": "external",
+        "sam3_service": "external"
+      },
+      "effective_conditions": {
+        "suite": "libero_object",
+        "task_id": 9,
+        "seed": 1,
+        "max_episode_steps": 500,
+        "vla_service": "external",
+        "sam3_service": "external"
+      },
+      "metrics": {
+        "native_exit_code": 1
+      },
+      "evidence_paths": [
+        "runs/probe-real-matrix-c1-20260918-031729-741501/participants/rpent_libero/jobs/job_0006/attempts/0001/native/object_t9_s1.json"
+      ]
+    }
+  ]
+}
