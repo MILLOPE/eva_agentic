@@ -268,8 +268,11 @@ provenance），让证据随 run 一起留存；也可用 `--out-dir` 额外生�
 
     ./.venv/bin/eva-agentic visualize --runs-root runs
 
-输出含 `summary.csv`、`summary.json`、`report.html`、`provenance.json`，
-以及一套参考风格图（每个图同时导出 PNG/SVG/PDF，并汇总成 `all_figures.pdf`）：
+输出含 14 字段稳定 schema 的 `summary.csv/json`、更完整的
+`case_metrics.csv/json`（exit code、model、planner 轮数、LLM/tool 调用、
+tool 错误、loop feedback、token 用量、finish 状态和失败原因）、可排序过滤的
+`report.html` 主表、`provenance.json`，以及一套参考风格图（每个图同时导出
+PNG/SVG/PDF，并汇总成 `all_figures.pdf`）：
 
 - `00_suite_overview`：按 suite × participant 的“计划试验成功率”矩阵，
   副数值显示有效结果覆盖率。
@@ -282,10 +285,15 @@ provenance），让证据随 run 一起留存；也可用 `--out-dir` 额外生�
   timeout / infra / invalid / unstarted），不静默丢弃缺失结果。
 - `04_tasks_<suite>__<participant>__p<NN>`：任务级成功率，0–100% 同尺度
   分页（默认每页 24），长任务列表自动分页。
+- `05_process_metrics`：每个 selected attempt 的 planner 轮数与 tool 调用
+  负载，并在标签中展示 tool errors；缺失指标不填成零。
 
 报告嵌入状态图例、coverage 语义说明（valid = success/task_failure/timeout；
 unknown = infra/invalid/unstarted；零有效结果显示 `P` 而非 0%）与紧凑 JSON
-payload，`figure_manifest.json` 记录每张图的来源。聚合逻辑在
+payload；HTML 主表覆盖 suite/task/seed/status、耗时、planner 轮数、
+LLM/tool 调用、tool 错误、finish 状态、失败原因、exit code 和 model，支持
+点击表头排序与 suite/status/search 过滤。`figure_manifest.json` 记录每张图的
+来源。聚合逻辑在
 `src/eva_agentic/viz.py`，只读、不覆盖历史 run。
 - 先离线验证配置渲染：加 `--dry-run` 只渲染不跑服务。
 - 定正式规模前先确定“某并发下成功率不下降、不出现超时误判”的安全并发

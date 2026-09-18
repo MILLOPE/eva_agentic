@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import tempfile
 import unittest
@@ -11,6 +12,8 @@ from eva_agentic.experiment import resolve_experiment
 from eva_agentic.schema import AttemptStatus, EpisodeResult, OutcomeStatus
 from eva_agentic.store import commit_attempt, initialize_run, load_run, prepare_attempt
 from eva_agentic.viz import (
+    CASE_METRIC_FIELDS,
+    SUMMARY_FIELDS,
     aggregate_metrics,
     collect_rows,
     discover_runs,
@@ -19,6 +22,7 @@ from eva_agentic.viz import (
     render_report,
     suite_of,
     visualize_runs,
+    write_case_metrics,
     write_provenance,
     write_summary,
 )
@@ -68,6 +72,20 @@ class VizTest(unittest.TestCase):
             runs_root = run_dir.parent
 
             self.assertEqual(discover_runs(runs_root), [run_dir])
+            native = run_dir / "participants" / "fake" / "jobs" / "job_0001" / "attempts" / "0001" / "native"
+            native.mkdir(parents=True)
+            (native / "transcript_libero_object_t0_s0.json").write_text(json.dumps({
+                "model": "fake-model",
+                "finish": {"status": "success", "summary": "finished"},
+                "messages": [{"tool_calls": [{"function": {"name": "pi0_pick"}}, {"function": {"name": "segment"}}]}],
+                "stats": {
+                    "model_requests": 7, "turns_used": 7, "tool_calls": 4,
+                    "tool_execution_errors": 1, "loop_feedbacks": 2,
+                    "proposal_repairs": 1, "planner_loop_stopped": 0,
+                    "planner_runtime": "shared", "total_input_tokens": 120,
+                    "total_output_tokens": 34, "model_elapsed_s": 3.5,
+                },
+            }), encoding="utf-8")
             rows = collect_rows([run_dir])
             self.assertEqual(len(rows), 4)
             by_case = {row["case_id"]: row for row in rows}
@@ -84,13 +102,36 @@ class VizTest(unittest.TestCase):
 
             out_dir = root / "viz-out"
             write_summary(rows, out_dir / "summary.csv", out_dir / "summary.json")
+            write_case_metrics(rows, out_dir / "case_metrics.csv", out_dir / "case_metrics.json")
             self.assertTrue((out_dir / "summary.csv").is_file())
             self.assertTrue((out_dir / "summary.json").is_file())
+            self.assertTrue((out_dir / "case_metrics.csv").is_file())
+            self.assertTrue((out_dir / "case_metrics.json").is_file())
+
+            with (out_dir / "summary.csv").open(newline="", encoding="utf-8") as handle:
+                self.assertEqual(next(csv.reader(handle)), SUMMARY_FIELDS)
+            with (out_dir / "case_metrics.csv").open(newline="", encoding="utf-8") as handle:
+                self.assertEqual(next(csv.reader(handle)), CASE_METRIC_FIELDS)
+            summary_json = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
+            case_json = json.loads((out_dir / "case_metrics.json").read_text(encoding="utf-8"))
+            self.assertEqual(set(summary_json[0]), set(SUMMARY_FIELDS))
+            self.assertEqual(set(case_json[0]), set(CASE_METRIC_FIELDS))
+            self.assertEqual(case_json[0]["model_name"], "fake-model")
+            self.assertEqual(case_json[0]["planner_rounds"], 7)
+            self.assertEqual(case_json[0]["tool_calls"], 4)
+            self.assertEqual(case_json[0]["vla_calls"], 1)
+            self.assertEqual(case_json[0]["sam3_calls"], 1)
+            self.assertEqual(case_json[0]["failure_reason"], None)
 
             charts = render_charts(rows, out_dir)
             chart_names = list(charts)  # svg (no seaborn in eval venv) or png
             self.assertTrue(chart_names, "expected at least one chart")
-            self.assertTrue(render_report(rows, out_dir).is_file())
+            report = render_report(rows, out_dir)
+            self.assertTrue(report.is_file())
+            report_text = report.read_text(encoding="utf-8")
+            self.assertIn("Master case table", report_text)
+            self.assertIn("Planner rounds", report_text)
+            self.assertIn("Failure reason", report_text)
             self.assertTrue(write_provenance(out_dir, "svg").is_file())
 
     def test_visualize_runs_writes_in_place(self) -> None:

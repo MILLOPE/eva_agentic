@@ -47,12 +47,12 @@ STATUS_ORDER = [
     OutcomeStatus.INVALID,
 ]
 STATUS_COLORS = {
-    "success": "#2e8b57",
-    "task_failure": "#cd5c5c",
-    "timeout": "#d9a404",
-    "infrastructure_failure": "#7a869b",
-    "invalid": "#e0e0e0",
-    "unstarted": "#f4f4f4",
+    "success": "#4c78a8",
+    "task_failure": "#c44e52",
+    "timeout": "#d8a047",
+    "infrastructure_failure": "#7f8794",
+    "invalid": "#d4d4d4",
+    "unstarted": "#eeeeee",
 }
 STATUS_NAMES = {
     "success": "Success",
@@ -76,6 +76,16 @@ PENDING_STATUSES = ("infrastructure_failure", "invalid", "unstarted")
 STATUS_LEGEND_ORDER = ("success", "task_failure", "timeout",
                        "infrastructure_failure", "invalid", "unstarted")
 DEFAULT_PAGE_SIZE = 24
+
+# Extended evidence fields. The 14-field summary contract remains stable.
+CASE_METRIC_FIELDS = [
+    *SUMMARY_FIELDS,
+    "exit_code", "model_name", "planner_runtime", "planner_rounds", "llm_calls",
+    "tool_calls", "tool_errors", "loop_feedbacks", "proposal_repairs",
+    "planner_loop_stopped", "vla_calls", "sam3_calls", "input_tokens",
+    "output_tokens", "planner_elapsed_s", "state_records", "finish_status",
+    "failure_reason",
+]
 
 
 # --------------------------------------------------------------------------- #
@@ -103,8 +113,20 @@ def collect_rows(run_dirs: Iterable[str | Path]) -> list[dict[str, Any]]:
         for job in inputs.plan.jobs:
             case = job.cases[0]
             attempt = terminal_attempt(inputs.run_dir, job.participant, job.job_id)
-            rows.append(_case_row(run_id, case.to_dict(), job, attempt))
+            rows.append(_case_row(Path(run_dir), run_id, case.to_dict(), job, attempt))
     return rows
+
+
+def write_case_metrics(rows: Sequence[Mapping[str, Any]], out_csv: str | Path, out_json: str | Path) -> None:
+    """Write the extended per-case process table without changing summary schema."""
+    csv_path = Path(out_csv)
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=CASE_METRIC_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key) for key in CASE_METRIC_FIELDS})
+    Path(out_json).write_text(json.dumps(list(rows), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def write_summary(rows: Sequence[Mapping[str, Any]], out_csv: str | Path, out_json: str | Path) -> None:
@@ -118,7 +140,10 @@ def write_summary(rows: Sequence[Mapping[str, Any]], out_csv: str | Path, out_js
             writer.writerow({key: row.get(key) for key in SUMMARY_FIELDS})
     json_path = Path(out_json)
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(json.dumps(list(rows), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    json_path.write_text(
+        json.dumps([{key: row.get(key) for key in SUMMARY_FIELDS} for row in rows], ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -247,6 +272,7 @@ def visualize_runs(
         combined_rows.extend(rows)
         out = run_dir / viz_subdir
         write_summary(rows, out / "summary.csv", out / "summary.json")
+        write_case_metrics(rows, out / "case_metrics.csv", out / "case_metrics.json")
         report = render_report(rows, out)
         write_provenance(out, mode)
         per_run.append({
@@ -261,6 +287,7 @@ def visualize_runs(
         out = Path(aggregate_out_dir)
         out.mkdir(parents=True, exist_ok=True)
         write_summary(combined_rows, out / "summary.csv", out / "summary.json")
+        write_case_metrics(combined_rows, out / "case_metrics.csv", out / "case_metrics.json")
         report = render_report(combined_rows, out)
         write_provenance(out, mode)
         result["aggregate"] = {
@@ -283,12 +310,21 @@ def write_provenance(out_dir: str | Path, mode: str) -> Path:
         "plot_env": "eva-viz" if mode == "seaborn" else "eva-agentic-eval",
         "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+    if mode == "seaborn":
+        import matplotlib
+        import seaborn
+        import numpy
+        payload["software"] = {
+            "matplotlib": matplotlib.__version__,
+            "seaborn": seaborn.__version__,
+            "numpy": numpy.__version__,
+        }
     path = out / "provenance.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return path
 
 
-def _case_row(run_id: str, case: Mapping[str, Any], job: Any, attempt: Mapping[str, Any] | None) -> dict[str, Any]:
+def _case_row(run_dir: Path, run_id: str, case: Mapping[str, Any], job: Any, attempt: Mapping[str, Any] | None) -> dict[str, Any]:
     task_index = _task_index(case)
     base = {
         "run_id": run_id,
@@ -301,22 +337,25 @@ def _case_row(run_id: str, case: Mapping[str, Any], job: Any, attempt: Mapping[s
     }
     if attempt is None:
         return {**base, "attempt": None, "status": "unstarted", "task_success": None,
-                "duration_s": None, "termination_reason": None, "error_source": None, "success_source": None}
+                "duration_s": None, "termination_reason": None, "error_source": None, "success_source": None,
+                **_empty_process_metrics()}
     attempt_status = attempt.get("status")
     if attempt_status != AttemptStatus.COMPLETED.value:
         return {**base, "attempt": attempt.get("attempt_id"),
                 "status": OutcomeStatus.INFRASTRUCTURE_FAILURE.value, "task_success": None,
                 "duration_s": _duration_s(attempt), "termination_reason": attempt_status,
-                "error_source": None, "success_source": None}
+                "error_source": None, "success_source": None, **_process_metrics(run_dir, job, attempt)}
     result = _matching_result(attempt, case["case_id"])
     if result is None:
         return {**base, "attempt": attempt.get("attempt_id"), "status": OutcomeStatus.INVALID.value,
                 "task_success": None, "duration_s": _duration_s(attempt),
-                "termination_reason": "missing_native_result", "error_source": None, "success_source": None}
+                "termination_reason": "missing_native_result", "error_source": None, "success_source": None,
+                **_process_metrics(run_dir, job, attempt)}
     return {**base, "attempt": attempt.get("attempt_id"), "status": result.get("status"),
             "task_success": result.get("task_success"), "duration_s": _duration_s(attempt),
             "termination_reason": result.get("termination_reason"),
-            "error_source": result.get("error_source"), "success_source": result.get("success_source")}
+            "error_source": result.get("error_source"), "success_source": result.get("success_source"),
+            **_process_metrics(run_dir, job, attempt, result)}
 
 
 def _task_index(case: Mapping[str, Any]) -> int | None:
@@ -341,6 +380,88 @@ def _matching_result(attempt: Mapping[str, Any], case_id: str) -> Mapping[str, A
 def _duration_s(attempt: Mapping[str, Any]) -> float | None:
     value = (attempt.get("process") or {}).get("duration_s")
     return float(value) if isinstance(value, (int, float)) else None
+
+
+def _empty_process_metrics() -> dict[str, Any]:
+    keys = CASE_METRIC_FIELDS[len(SUMMARY_FIELDS):]
+    return {key: None for key in keys}
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _process_metrics(
+    run_dir: Path,
+    job: Any,
+    attempt: Mapping[str, Any],
+    result: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Extract behavioural evidence without changing the 14-field summary contract."""
+    metrics = _empty_process_metrics()
+    process = attempt.get("process") if isinstance(attempt.get("process"), dict) else {}
+    attempt_id = attempt.get("attempt_id")
+    attempt_dir = run_dir / "participants" / job.participant / "jobs" / job.job_id / "attempts" / f"{int(attempt_id or 0):04d}"
+    native = attempt_dir / "native"
+    transcripts = sorted(native.glob("transcript_*.json"))
+    transcript = _read_json(transcripts[0]) if transcripts else {}
+    stats = transcript.get("stats") if isinstance(transcript.get("stats"), dict) else {}
+    finish = transcript.get("finish") if isinstance(transcript.get("finish"), dict) else {}
+
+    metrics.update({
+        "exit_code": process.get("exit_code"),
+        "model_name": transcript.get("model"),
+        "planner_runtime": stats.get("planner_runtime"),
+        "planner_rounds": stats.get("model_requests", stats.get("turns_used")),
+        "llm_calls": stats.get("model_requests", stats.get("turns_used")),
+        "tool_calls": stats.get("tool_calls"),
+        "tool_errors": stats.get("tool_execution_errors"),
+        "loop_feedbacks": stats.get("loop_feedbacks"),
+        "proposal_repairs": stats.get("proposal_repairs"),
+        "planner_loop_stopped": stats.get("planner_loop_stopped"),
+        "input_tokens": stats.get("total_input_tokens"),
+        "output_tokens": stats.get("total_output_tokens"),
+        "planner_elapsed_s": stats.get("model_elapsed_s"),
+        "finish_status": finish.get("status"),
+    })
+
+    tool_counts: Counter[str] = Counter()
+    messages = transcript.get("messages")
+    if isinstance(messages, list):
+        for message in messages:
+            if not isinstance(message, dict) or not isinstance(message.get("tool_calls"), list):
+                continue
+            for call in message["tool_calls"]:
+                name = (((call or {}).get("function") or {}).get("name"))
+                if name:
+                    tool_counts[name] += 1
+    metrics["vla_calls"] = sum(count for name, count in tool_counts.items() if name.startswith("pi0_"))
+    metrics["sam3_calls"] = sum(count for name, count in tool_counts.items() if name in {"segment", "back_project"})
+
+    states = _read_json(native / "states.json")
+    metrics["state_records"] = len(states["steps"]) if isinstance(states.get("steps"), list) else None
+
+    if result:
+        native_metrics = result.get("metrics")
+        if isinstance(native_metrics, dict) and metrics.get("exit_code") is None:
+            metrics["exit_code"] = native_metrics.get("native_exit_code")
+
+    if finish.get("summary") and (result is None or result.get("task_success") is not True):
+        metrics["failure_reason"] = finish.get("summary")
+    elif result and result.get("termination_reason"):
+        metrics["failure_reason"] = result.get("termination_reason")
+    elif result and result.get("error_source"):
+        metrics["failure_reason"] = result.get("error_source")
+    elif stats.get("planner_loop_stopped"):
+        metrics["failure_reason"] = (
+            f"planner loop guard stopped ({stats.get('tool_execution_errors', 0)} tool errors, "
+            f"{stats.get('loop_feedbacks', 0)} loop feedbacks)"
+        )
+    return metrics
 
 
 # --------------------------------------------------------------------------- #
@@ -392,7 +513,36 @@ def _render_charts_seaborn(rows: Sequence[Mapping[str, Any]], directory: Path) -
     import matplotlib.pyplot as plt
     import seaborn as sns
 
-    sns.set_theme(style="whitegrid", palette="deep")
+    sns.set_theme(
+        context="paper",
+        style="whitegrid",
+        palette=["#4c78a8", "#c44e52", "#d8a047", "#7f8794", "#8172b3", "#6b9e78"],
+        rc={
+            "font.family": "sans-serif",
+            "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
+            "font.size": 7.5,
+            "axes.titlesize": 8.5,
+            "axes.labelsize": 7.5,
+            "xtick.labelsize": 7.0,
+            "ytick.labelsize": 7.0,
+            "legend.fontsize": 6.8,
+            "axes.linewidth": 0.5,
+            "grid.linewidth": 0.4,
+            "grid.alpha": 0.18,
+            "xtick.major.size": 2.2,
+            "ytick.major.size": 2.2,
+            "xtick.major.width": 0.45,
+            "ytick.major.width": 0.45,
+            "lines.linewidth": 0.9,
+            "legend.frameon": False,
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+            "svg.fonttype": "none",
+            "savefig.dpi": 300,
+        },
+    )
     paths, records = _render_stresskit(rows, directory)
     _save_figure_manifest(directory, records)
     plt.close("all")
@@ -409,8 +559,10 @@ def _drawing_defaults() -> dict[str, Any]:
     def mix(a, b, w):
         return tuple((1 - w) * x + w * y for x, y in zip(a, b))
     base = to_rgb(cycle[0])
-    cmap = LinearSegmentedColormap.from_list("automatic_rate", [mix(paper, base, .035), mix(paper, base, .5), base])
-    status_colors = [mix(paper, to_rgb(cycle[i]), .57) for i in range(len(STATUS_LEGEND_ORDER))]
+    cmap = LinearSegmentedColormap.from_list(
+        "academic_rate", [mix(paper, base, .045), mix(paper, base, .48), base]
+    )
+    status_colors = [mix(paper, to_rgb(cycle[i]), .62) for i in range(len(STATUS_LEGEND_ORDER))]
     return {"paper": paper, "ink": ink, "soft": mix(paper, ink, .045), "line": mix(paper, ink, .18),
             "cmap": cmap, "status_colors": status_colors, "method_colors": cycle}
 
@@ -421,7 +573,7 @@ def _save_fig(fig, stem: Path, pdf, records: list, name: str, kind: str, **extra
     fig.canvas.draw()
     stem.parent.mkdir(parents=True, exist_ok=True)
     for ext in ("png", "svg", "pdf"):
-        fig.savefig(stem.with_suffix("." + ext), dpi=240)
+        fig.savefig(stem.with_suffix("." + ext), dpi=300)
     pdf.savefig(fig)
     records.append({"name": name, "kind": kind, "axes": len(fig.axes),
                     "size_inches": list(fig.get_size_inches()), **extra})
@@ -430,10 +582,11 @@ def _save_fig(fig, stem: Path, pdf, records: list, name: str, kind: str, **extra
 
 
 def _header_footer(fig, title: str, subtitle: str, footer: str, synthetic: bool = False) -> None:
-    fig.text(.045, .965, title, fontsize=11.2, weight="semibold", va="top")
-    fig.text(.965, .965, "SYNTHETIC DATA" if synthetic else "EVA-AGENTIC DATA", fontsize=7.4, ha="right", va="top")
-    fig.text(.045, .918, subtitle, fontsize=7.6, va="top", alpha=.74)
-    fig.text(.045, .024, footer, fontsize=6.7, va="bottom", linespacing=1.45, alpha=.82)
+    fig.text(.045, .968, title, fontsize=9.8, weight="bold", va="top")
+    fig.text(.965, .965, "SYNTHETIC DATA" if synthetic else "EVA-AGENTIC DATA", fontsize=6.4,
+             ha="right", va="top", alpha=.62)
+    fig.text(.045, .922, subtitle, fontsize=6.8, va="top", alpha=.68)
+    fig.text(.045, .024, footer, fontsize=6.0, va="bottom", linespacing=1.35, alpha=.72)
 
 
 def _render_stresskit(rows: Sequence[Mapping[str, Any]], directory: Path) -> tuple[dict[str, Path], list[dict]]:
@@ -467,7 +620,7 @@ def _render_stresskit(rows: Sequence[Mapping[str, Any]], directory: Path) -> tup
                    "P = pending (no valid outcome, not measured 0%).", synthetic=False)
     cmap, norm = style["cmap"], plt.Normalize(0, 100)
     for j, p in enumerate(participants):
-        ax.text(j + .5, len(suites) + .35, p, ha="center", va="center", weight="semibold", fontsize=8)
+        ax.text(j + .5, len(suites) + .35, p, ha="center", va="center", weight="bold", fontsize=8)
     for i, s in enumerate(suites):
         ax.text(-.08, len(suites) - i - .5, s, ha="right", va="center", fontsize=8)
         for j, p in enumerate(participants):
@@ -517,7 +670,7 @@ def _render_stresskit(rows: Sequence[Mapping[str, Any]], directory: Path) -> tup
         ax.tick_params(length=0)
         ax.set_xticks(np.arange(-.5, len(seeds), 1), minor=True)
         ax.set_yticks(np.arange(-.5, len(task_ids), 1), minor=True)
-        ax.grid(which="minor", lw=1.2, color=style["paper"])
+        ax.grid(which="minor", lw=1.1, color=style["paper"])
         for i in range(matrix.shape[0]):
             for j in range(matrix.shape[1]):
                 status = STATUS_LEGEND_ORDER[int(matrix[i, j])]
@@ -560,7 +713,7 @@ def _render_stresskit(rows: Sequence[Mapping[str, Any]], directory: Path) -> tup
                     sorted(metrics["suites"], key=lambda x: (x["suite_id"], x["participant"]))])
         ax.set_ylim(len(metrics["suites"]) - .65, -.65)
         ax.set_xlabel("Selected-attempt process duration (s)"); ax.set_xlim(left=0, right=max(1, ax.get_xlim()[1]))
-        ax.grid(axis="x", alpha=.22, lw=.55); ax.set_axisbelow(True); ax.tick_params(length=2.5)
+        ax.grid(axis="x", alpha=.18, lw=.4); ax.set_axisbelow(True); ax.tick_params(length=2.2)
         for sp in ("top", "right", "left"):
             ax.spines[sp].set_visible(False)
         paths["02_duration"] = _save_fig(fig, directory / "02_duration", pdf, records, "02_duration", "duration")
@@ -598,6 +751,51 @@ def _render_stresskit(rows: Sequence[Mapping[str, Any]], directory: Path) -> tup
         fig.legend(handles=handles, ncol=3, loc="lower center", bbox_to_anchor=(.5, .06),
                    frameon=False, fontsize=7, handlelength=1.2, columnspacing=2)
         paths["03_outcomes"] = _save_fig(fig, directory / "03_outcomes", pdf, records, "03_outcomes", "outcomes", cells=len(cells))
+
+    # --- 05 process evidence: planner rounds and native tool-call load per case ---
+    process_rows = sorted(
+        [row for row in rows if isinstance(row.get("planner_rounds"), (int, float))],
+        key=lambda r: (suite_of(r), str(r.get("participant")), _task_sort_key(r.get("task_id")), int(r.get("seed") or 0)),
+    )
+    if process_rows:
+        n = len(process_rows)
+        fig, ax = plt.subplots(figsize=(7.2, max(3.0, .43 * n + 1.6)))
+        fig.subplots_adjust(left=.26, right=.90, bottom=.18, top=.86)
+        _header_footer(fig, "Planner rounds and tool-call load",
+                       "one selected terminal attempt per row; native planner metrics",
+                       "Planner rounds are model requests reported by RPent. Tool calls are planner-requested tools; "
+                       "the right-hand label also exposes tool errors. Missing metrics are not imputed as zero.",
+                       synthetic=False)
+        planner_color = style["method_colors"][0]
+        tool_color = style["method_colors"][1]
+        ys = list(range(n))
+        for i, row in enumerate(process_rows):
+            rounds = float(row.get("planner_rounds") or 0)
+            tools = float(row.get("tool_calls") or 0)
+            ax.barh(i - .18, rounds, height=.30, color=planner_color, alpha=.92, linewidth=0)
+            ax.barh(i + .18, tools, height=.30, color=tool_color, alpha=.82, linewidth=0)
+            ax.text(rounds + max(rounds, tools) * .025 + .25, i - .18, f"{rounds:.0f}",
+                    va="center", fontsize=6.4, color=style["ink"])
+            label = (f"L{rounds:.0f} / T{tools:.0f} / E{row.get('tool_errors') or 0}")
+            ax.text(1.015, i, label, transform=ax.get_yaxis_transform(), va="center",
+                    fontsize=6.5, color=style["ink"], alpha=.82)
+        max_value = max(max(float(r.get("planner_rounds") or 0), float(r.get("tool_calls") or 0)) for r in process_rows)
+        ax.set_yticks(ys, [f"{_short_task(r.get('task_id'))} s{r.get('seed')}" for r in process_rows], fontsize=6.8)
+        ax.set_ylim(n - .45, -.55)
+        ax.set_xlim(0, max(4, max_value * 1.18))
+        ax.set_xlabel("Count per selected attempt")
+        ax.grid(axis="x", alpha=.14, lw=.4)
+        ax.tick_params(length=2.0)
+        ax.set_axisbelow(True)
+        for spine in ("top", "right", "left"):
+            ax.spines[spine].set_visible(False)
+        from matplotlib.patches import Patch
+        handles = [Patch(facecolor=planner_color, label="Planner rounds / LLM calls"),
+                   Patch(facecolor=tool_color, label="Tool calls")]
+        fig.legend(handles=handles, ncol=2, loc="lower center", bbox_to_anchor=(.55, .055),
+                   frameon=False, fontsize=6.8, handlelength=1.1, columnspacing=1.8)
+        paths["05_process_metrics"] = _save_fig(fig, directory / "05_process_metrics", pdf, records,
+                                                "05_process_metrics", "process", cases=n)
 
     # --- 05 task pages (fixed 0-100 scale, paginated) when a suite has many tasks ---
     task_metrics = sorted(metrics["tasks"], key=lambda t: (t["suite_id"], t["participant"], _task_sort_key(t["task_id"] or "")))
@@ -676,14 +874,23 @@ def _blank_png(message: str, path: Path) -> Path:
 
 
 def render_report(rows: Sequence[Mapping[str, Any]], out_dir: str | Path) -> Path:
-    """Write a standalone self-contained HTML dashboard: charts, metrics, legend, payload."""
+    """Write a standalone interactive dashboard with charts and one master table."""
     directory = Path(out_dir)
     directory.mkdir(parents=True, exist_ok=True)
     charts = render_charts(rows, directory)
     metrics = aggregate_metrics(rows)
-    head = "".join(f"<th>{field}</th>" for field in SUMMARY_FIELDS)
+
+    master_fields = [
+        ("suite", "Suite"), ("task_id", "Task"), ("seed", "Seed"), ("participant", "Participant"),
+        ("status", "Status"), ("task_success", "Success"), ("duration_s", "Duration (s)"),
+        ("planner_rounds", "Planner rounds"), ("llm_calls", "LLM calls"), ("tool_calls", "Tool calls"),
+        ("tool_errors", "Tool errors"), ("loop_feedbacks", "Loop feedbacks"), ("finish_status", "Finish"),
+        ("failure_reason", "Failure reason"), ("exit_code", "Exit"), ("model_name", "Model"),
+        ("attempt", "Attempt"), ("success_source", "Success source"),
+    ]
+    head = "".join(f'<th data-key="{key}">{label}</th>' for key, label in master_fields)
     body_table = "".join(
-        "<tr>" + "".join(f"<td>{_escape(_cell(row.get(field)))}</td>" for field in SUMMARY_FIELDS) + "</tr>"
+        "<tr>" + "".join(f'<td data-key="{key}">{_escape(_cell(suite_value(row, key)))}</td>' for key, _ in master_fields) + "</tr>"
         for row in rows
     )
     chart_blocks = "".join(
@@ -691,8 +898,7 @@ def render_report(rows: Sequence[Mapping[str, Any]], out_dir: str | Path) -> Pat
         for name, path in charts.items()
     )
     legend = "".join(
-        f'<span style="display:inline-flex;align-items:center;gap:6px;margin-right:18px">'
-        f'<span style="width:16px;height:16px;background:{_escape(STATUS_COLORS[s])};display:inline-block"></span>'
+        f'<span class="legend-item"><span class="dot" style="background:{_escape(STATUS_COLORS[s])}"></span>'
         f'{_escape(GLYPHS[s])} {_escape(STATUS_NAMES[s])}</span>'
         for s in STATUS_LEGEND_ORDER
     )
@@ -702,51 +908,69 @@ def render_report(rows: Sequence[Mapping[str, Any]], out_dir: str | Path) -> Pat
                           "yield_pct", "valid_pct", "upper_pct", "duration_n")) + "</tr>"
         for m in metrics["suites"]
     )
+    suite_options = "".join(f'<option value="{_escape(s)}">{_escape(s)}</option>' for s in sorted({suite_of(row) for row in rows}))
     payload = {
-        "rows": [{
-            "run_id": r.get("run_id"), "task_id": r.get("task_id"), "task_index": r.get("task_index"),
-            "seed": r.get("seed"), "participant": r.get("participant"), "status": r.get("status"),
-            "success": r.get("task_success"), "duration_s": r.get("duration_s"),
-        } for r in rows],
-        "tasks": metrics["tasks"],
-        "suites": metrics["suites"],
-        "status_order": list(STATUS_LEGEND_ORDER),
-        "colors": [STATUS_COLORS[s] for s in STATUS_LEGEND_ORDER],
+        "rows": [{field: r.get(field) for field, _ in master_fields} for r in rows],
+        "tasks": metrics["tasks"], "suites": metrics["suites"],
+        "status_order": list(STATUS_LEGEND_ORDER), "colors": [STATUS_COLORS[s] for s in STATUS_LEGEND_ORDER],
         "glyphs": [GLYPHS[s] for s in STATUS_LEGEND_ORDER],
     }
     payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     html = f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>eva-agentic viz</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>eva-agentic viz</title>
 <style>
-:root{{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px;color:#242b34;background:#fafbfc}}
-*{{box-sizing:border-box}}body{{max-width:1100px;margin:30px auto;padding:0 28px 60px}}
-h1{{font-size:25px;letter-spacing:-.6px;margin:0 0 8px}}h2{{font-size:18px;margin:32px 0 10px}}h3{{font-size:15px}}
-p{{line-height:1.7}}.eyebrow{{font-size:11px;font-weight:700;letter-spacing:1.4px;margin-bottom:10px;color:#687783}}
-header{{border-bottom:1px solid #d9dde1;padding-bottom:18px}}.muted{{color:#646f7a;font-size:12px}}
-section{{margin-top:30px}}img{{max-width:100%;height:auto;background:white;border:1px solid #e3e6e9}}
-table{{border-collapse:separate;border-spacing:3px;width:100%;font-size:12px}}
-th{{font-weight:600;text-align:center;padding:5px;background:#edf1f4}}td{{text-align:center;padding:6px 4px;background:#f4f5f6}}
-.legend{{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin:14px 0}}.scroll{{overflow-x:auto}}
-.note{{padding:12px 16px;background:#edf1f4;border-left:3px solid #687783;line-height:1.75}}
+:root{{font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px;color:#20272e;background:#f7f8fa}}
+*{{box-sizing:border-box}}body{{max-width:1280px;margin:32px auto;padding:0 28px 72px}}
+h1{{font-size:25px;letter-spacing:-.65px;margin:0}}h2{{font-size:17px;margin:34px 0 10px}}h3{{font-size:14px}}
+p{{line-height:1.65}}.eyebrow{{font-size:11px;font-weight:750;letter-spacing:1.35px;color:#68777f;margin-bottom:8px}}
+.muted{{color:#636f78;font-size:12.5px}}header{{padding-bottom:20px;border-bottom:1px solid #dce0e4}}
+section{{margin-top:34px}}img{{max-width:100%;height:auto;background:white;border:1px solid #e2e5e8;border-radius:4px}}
+table{{border-collapse:separate;border-spacing:0;width:100%;font-size:12px;background:white;border:1px solid #e0e4e8}}
+th{{position:sticky;top:0;background:#eef1f4;color:#39444c;font-weight:650;text-align:center;padding:8px 7px;border-bottom:1px solid #d5dade;cursor:pointer;white-space:nowrap}}
+td{{text-align:center;padding:7px 7px;border-bottom:1px solid #eef0f2;vertical-align:top;max-width:420px}}
+tbody tr:hover td{{background:#f6f8fa}}.scroll{{overflow:auto;max-height:680px;border:1px solid #e0e4e8;border-radius:5px;background:white}}
+.legend{{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin:14px 0}}.legend-item{{display:inline-flex;align-items:center;gap:6px}}
+.dot{{width:14px;height:14px;border-radius:3px;display:inline-block}}
+.controls{{display:flex;gap:10px;align-items:center;margin:12px 0;flex-wrap:wrap}}select,input{{padding:6px 8px;border:1px solid #cfd5da;border-radius:4px;background:white}}
+.note{{padding:13px 16px;background:#eef1f4;border-left:3px solid #68777f;line-height:1.65}}.footer{{margin-top:35px;color:#6a757d;font-size:12px}}
 </style></head><body>
-<header><div class="eyebrow">EVA-AGENTIC / VISUALIZATION</div><h1>eva-agentic visualization</h1>
-<p class="muted">{len(rows)} planned case(s). The summary CSV/JSON alongside is the authoritative artifact.</p></header>
-<section><h2>Chart legend</h2><div class="legend">{legend}</div>
+<header><div class="eyebrow">EVA-AGENTIC / EVALUATION EVIDENCE</div><h1>Run visualization</h1>
+<p class="muted">{len(rows)} planned case(s). The CSV/JSON artifacts in this directory are authoritative; the table is view-only.</p></header>
+<section><h2>Outcome legend and coverage</h2><div class="legend">{legend}</div>
 <div class="note">Coverage: <b>valid</b> = success + task_failure + timeout (decisive native outcome); <b>unknown</b> =
 infrastructure / invalid / unstarted (does not establish success or failure). A planned task with zero valid outcomes is
 shown as <b>P</b>, not as a measured 0%. Different suites are never merged into a single score.</div></section>
+<section><h2>Master case table</h2>
+<div class="controls"><label>Suite <select id="suite"><option value="">All</option>{suite_options}</select></label>
+<label>Status <select id="status"><option value="">All</option>{"".join(f'<option value="{s}">{STATUS_NAMES[s]}</option>' for s in STATUS_LEGEND_ORDER)}</select></label>
+<input id="search" placeholder="Search task / reason / participant"></div>
+<div class="scroll"><table id="master"><thead><tr>{head}</tr></thead><tbody>{body_table}</tbody></table></div></section>
 {chart_blocks}
 <section><h2>Suite metrics</h2><div class="scroll"><table><thead><tr>
 <th>suite</th><th>participant</th><th>planned</th><th>success</th><th>valid</th><th>unknown</th>
 <th>yield%</th><th>valid%</th><th>upper%</th><th>dur n</th></tr></thead>
 <tbody>{suite_rows or "<tr><td colspan='10'>no suites</td></tr>"}</tbody></table></div></section>
-<h2>Per-case summary table</h2><div class="scroll"><table><thead><tr>{head}</tr></thead><tbody>{body_table}</tbody></table></div>
 <script id="payload" type="application/json">{payload_json}</script>
+""" + r"""<script>
+const table=document.getElementById('master'),tbody=table.tBodies[0];
+const rows=[...tbody.rows];let sortKey=null,asc=true;
+document.getElementById('suite').addEventListener('change',filter);
+document.getElementById('status').addEventListener('change',filter);
+document.getElementById('search').addEventListener('input',filter);
+table.querySelectorAll('th').forEach((th,index)=>th.addEventListener('click',()=>{const key=th.dataset.key;if(sortKey===key)asc=!asc;else{sortKey=key;asc=true}rows.sort((a,b)=>compare(a.children[index],b.children[index]));if(!asc)rows.reverse();tbody.append(...rows);table.querySelectorAll('th').forEach(x=>x.classList.remove('sorted'));th.classList.add('sorted')}));
+function filter(){const suite=document.getElementById('suite').value,status=document.getElementById('status').value,q=document.getElementById('search').value.toLowerCase();for(const row of rows){const cells=Object.fromEntries([...row.children].map(c=>[c.dataset.key,c.textContent.toLowerCase()]));row.hidden=Boolean((suite&&cells.suite!==suite)||(status&&cells.status!==status)||(q&&!Object.values(cells).join(' ').includes(q)))}}
+function compare(a,b){const av=a.textContent.trim(),bv=b.textContent.trim(),an=parseFloat(av),bn=parseFloat(bv);if(!isNaN(an)&&!isNaN(bn))return an-bn;return av.localeCompare(bv)}
+</script>
+<div class="footer">Duration is selected-attempt process duration, not pure inference time. Missing process metrics display “None”; they are not imputed as zero.</div>
 </body></html>
 """
     path = directory / "report.html"
     path.write_text(html, encoding="utf-8")
     return path
+
+
+def suite_value(row: Mapping[str, Any], field: str) -> Any:
+    return suite_of(row) if field == "suite" else row.get(field)
 
 def _svg_document(width: int, height: int, body: str) -> str:
     marks = body.split("<chartbox ")
