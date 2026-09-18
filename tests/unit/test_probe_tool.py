@@ -1,8 +1,9 @@
-"""End-to-end offline tests for the capacity-probe CLI scripts.
+"""End-to-end offline tests for the capacity-probe CLI commands.
 
-These run the real ``scripts/`` executables but only in ``--dry-run`` (no
-services, no scheduling).  They guard the template placeholder rendering and
-case generation against regressions like YAML flow-mapping surprises.
+These run the real ``eva-agentic`` entry point in subprocesses, but only with
+``--dry-run`` (no services, no scheduling).  They guard template placeholder
+rendering and case generation against regressions like YAML flow-mapping
+surprises.
 """
 
 from __future__ import annotations
@@ -12,8 +13,6 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-GEN = REPO_ROOT / "scripts" / "gen_libero_cases.py"
-PROBE = REPO_ROOT / "scripts" / "probe_concurrency.py"
 
 EXPERIMENT_TEMPLATE = """\
 schema_version: 1
@@ -64,7 +63,8 @@ def _write(root: Path, name: str, content: str) -> Path:
 
 def _run_cli(argv: list[str]) -> str:
     result = subprocess.run(
-        [sys.executable, *argv], cwd=REPO_ROOT, capture_output=True, text=True
+        [sys.executable, "-m", "eva_agentic", *argv],
+        cwd=REPO_ROOT, capture_output=True, text=True,
     )
     assert result.returncode == 0, f"{argv[0]} failed: {result.stderr}\n{result.stdout}"
     return result.stdout
@@ -72,12 +72,12 @@ def _run_cli(argv: list[str]) -> str:
 
 def test_gen_cases(tmp_path) -> None:
     cases = tmp_path / "cases.jsonl"
-    _run_cli([str(GEN), "--suite", "libero_object", "--tasks", "0,2",
-              "--seed-base", "0", "--seed-count", "2",
-              "--max-episode-steps", "500", "--out", str(cases)])
+    _run_cli(["gen-cases", "--suite", "libero_object", "--tasks", "0,2",
+               "--seed-base", "0", "--seed-count", "2",
+               "--max-episode-steps", "500", "--out", str(cases)])
     lines = cases.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 4
-    assert cases.read_text(encoding="utf-8").splitlines()[0].count("libero_object") >= 1
+    assert "libero_object" in lines[0]
 
 
 def test_probe_dry_run_renders_configs(tmp_path) -> None:
@@ -87,7 +87,7 @@ def test_probe_dry_run_renders_configs(tmp_path) -> None:
     cases = _write(tmp_path, "cases.jsonl", '{"case_id":"libero_object:t0:s0"}\n')
 
     out = _run_cli(
-        [str(PROBE), "--experiment", str(exp), "--cases", str(cases),
+        ["probe", "--experiment", str(exp), "--cases", str(cases),
          "--frameworks", str(frameworks), "--profile", str(profile),
          "--concurrency", "1,2", "--tag", "t", "--dry-run",
          "--work-dir", str(tmp_path / ".probe"),
@@ -103,3 +103,47 @@ def test_probe_dry_run_renders_configs(tmp_path) -> None:
     assert "cases_file:" in exp2 and str(cases) in exp2
     assert "probe-t" in exp2
     assert "  - 0\n  - 1" in prof2
+
+
+
+
+def test_collect_metrics_counts_all_attempts(tmp_path) -> None:
+    """Lock per-attempt result discovery against the runs/ directory layout."""
+    import json
+
+    from eva_agentic.experiment import resolve_experiment
+    from eva_agentic.probe import _collect_metrics
+    from eva_agentic.schema import AttemptStatus, EpisodeResult, OutcomeStatus
+    from eva_agentic.store import commit_attempt, initialize_run, load_run, prepare_attempt
+
+    root = Path(tmp_path)
+    cases = root / "cases.jsonl"
+    cases.write_text(
+        "".join(
+            json.dumps({"case_id": f"c{index}", "task_id": f"t{index}", "seed": 0, "initialization": {"task_id": index}}) + "\n"
+            for index in range(2)
+        ),
+        encoding="utf-8",
+    )
+    experiment = resolve_experiment({
+        "schema_version": 1, "name": "metrics", "benchmark": "fake", "cases_file": str(cases),
+        "participants": ["fake"],
+        "protocol": {"track": "test", "phase": "eval", "memory_policy": "frozen", "scoring": "native"},
+        "execution": {"mode": "debug", "max_jobs": 1, "max_infrastructure_retries": 0, "job_timeout_s": 1},
+        "artifacts": {"video": "off", "trace": "off"},
+    })
+    run_dir = initialize_run(root / "runs", experiment, "metrics")
+    plan = load_run(run_dir).plan
+    outcomes = [OutcomeStatus.SUCCESS, OutcomeStatus.TASK_FAILURE]
+    for job, status in zip(plan.jobs, outcomes):
+        attempt = prepare_attempt(run_dir, job, 1)
+        success = status is OutcomeStatus.SUCCESS
+        commit_attempt(attempt, AttemptStatus.COMPLETED, {"duration_s": 60.0},
+                       (EpisodeResult(job.cases[0].case_id, status, success),))
+    metrics = _collect_metrics(run_dir)
+
+    assert metrics["completed"] == 2
+    assert metrics["success"] == 1
+    assert metrics["task_failure"] == 1
+    assert metrics["infra"] == 0
+    assert metrics["ep_obs"] == 2

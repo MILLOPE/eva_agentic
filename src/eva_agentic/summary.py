@@ -23,7 +23,7 @@ def summarize_run(run_dir: str | Path) -> dict[str, object]:
         "unstarted": 0,
     }
     for job in inputs.plan.jobs:
-        attempt = _terminal_attempt(inputs.run_dir, job.participant, job.job_id)
+        attempt = terminal_attempt(inputs.run_dir, job.participant, job.job_id)
         if attempt is None:
             counts["unstarted"] += 1
             continue
@@ -50,7 +50,9 @@ def summarize_run(run_dir: str | Path) -> dict[str, object]:
     }
 
 
-def _terminal_attempt(run_dir: Path, participant: str, job_id: str) -> dict[str, Any] | None:
+def terminal_attempt(run_dir: str | Path, participant: str, job_id: str) -> dict[str, Any] | None:
+    """Return the terminal attempt result for one job, prioritizing completed attempts."""
+    run_dir = Path(run_dir)
     root = attempt_directory(run_dir, participant, job_id, 1).parent
     if not root.is_dir():
         return None

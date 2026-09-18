@@ -157,6 +157,21 @@ class RpentLiberoAdapterTest(unittest.TestCase):
             )[0]
         self.assertEqual(result.status, OutcomeStatus.INFRASTRUCTURE_FAILURE)
 
+    def test_nonzero_exit_with_unsolved_signal_is_task_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            attempt = root / "attempt"
+            attempt.mkdir(parents=True)
+            (attempt / "stdout.log").write_text(
+                "recipe: not written (cell unsolved)\n", encoding="utf-8"
+            )
+            result = self.make_adapter(root).parse(
+                self.make_job(), attempt, self.run_result(root, exit_code=1)
+            )[0]
+        self.assertEqual(result.status, OutcomeStatus.TASK_FAILURE)
+        self.assertIs(result.task_success, False)
+        self.assertEqual(result.error_source, "rpent.task")
+
 
 if __name__ == "__main__":
     unittest.main()

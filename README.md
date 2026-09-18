@@ -50,33 +50,32 @@ eva-agentic --help
 根据实验配置创建新的运行目录。每次实验都应使用新的运行 ID，从而保证历史实验产生的证据不会被覆盖或修改。
 
 ```bash
-RUN_ID="rpent-libero-$(date -u +%Y%m%d-%H%M%S)"
+RUN_ID="rpent-vllm-user-libero-$(date -u +%Y%m%d-%H%M%S)"
 
 eva-agentic init \
-  --experiment examples/rpent-libero.experiment.example.yaml \
+  --experiment examples/rpent-vllm-user-libero.experiment.example.yaml \
   --runs-root runs \
   --run-id "$RUN_ID"
 ```
 
-首次使用时，准备一份机器本地配置，然后填写解释器、服务端点、GPU 槽位、模型参数和认证信息。`profiles/` 目录已被 Git 忽略。
+首次使用时，准备一份机器本地配置，然后填写解释器、服务端点、GPU 槽位、模型参数和签名信息。`profiles/` 目录已被 Git 忽略。
 
 ```bash
-cp examples/local-profile.example.yaml profiles/rpent-libero.yaml
+cp examples/rpent-vllm-user-libero.profile.example.yaml \
+  profiles/rpent-vllm-user-libero.yaml
 
-$EDITOR profiles/rpent-libero.yaml
+$EDITOR profiles/rpent-vllm-user-libero.yaml
 ```
 
-通过评测器运行框架原生命令。RPent 示例默认使用 `openai:gpt-5.5`；开始运行前需要导出对应 API Key，或者先修改已提交到版本库中的框架声明，换成当前机器可用的模型。
+通过评测器运行框架原生命令。RPent vllm-user 示例默认使用签名 vLLM 服务；开始运行前需要已有 VLA/SAM3 服务，并通过 `scripts/with-rpent-vllm-user-env.sh` 注入签名变量。
 
 ```bash
 RUN_DIR="runs/$RUN_ID"
 
-export OPENAI_API_KEY="<your-key>"
-
-eva-agentic run \
+scripts/with-rpent-vllm-user-env.sh ./.venv/bin/eva-agentic run \
   --run-dir "$RUN_DIR" \
-  --frameworks examples/rpent-libero.frameworks.example.yaml \
-  --profile profiles/rpent-libero.yaml
+  --frameworks examples/rpent-vllm-user-libero.frameworks.example.yaml \
+  --profile profiles/rpent-vllm-user-libero.yaml
 ```
 
 查看标准化后的结果，并检查保留下来的实验文件：
@@ -92,7 +91,7 @@ find "$RUN_DIR" -maxdepth 3 -type f | sort
 ```bash
 ./.venv/bin/eva-agentic --help
 
-ENV="$PWD/.envs/eva-rpent-libero"
+ENV="$PWD/.envs/eva-rpent-vllm-user"
 
 "$ENV/bin/python" -m rpent.cli.main --help
 ```
@@ -137,13 +136,15 @@ done
 
 可以使用以下三个示例文件作为最小 smoke 配置：
 
-* [框架声明](examples/rpent-libero.frameworks.example.yaml)
-* [单 case 列表](examples/rpent-libero.cases.example.jsonl)
-* [实验配置](examples/rpent-libero.experiment.example.yaml)
+* [框架声明](examples/rpent-vllm-user-libero.frameworks.example.yaml)
+* [单 case 列表](examples/rpent-vllm-user-libero.cases.example.jsonl)
+* [实验配置](examples/rpent-vllm-user-libero.experiment.example.yaml)
 
 这些示例只用于进行小规模 smoke 检查，并不代表已经完成真实机器环境下的完整验证。
 
-示例默认使用 `openai:gpt-5.5`。可以在未跟踪的本地配置中设置 `OPENAI_API_KEY`，并在需要时设置 `OPENAI_BASE_URL`；也可以将框架声明中的模型替换为当前机器可用的其他 provider。
+示例默认使用 vllm-user 的签名 vLLM 服务。签名变量由
+`scripts/with-rpent-vllm-user-env.sh` 从本机 RPent 环境注入，不写入仓库或
+framework 声明；VLA/SAM3 端点放在被 Git 忽略的本地配置中。
 
 当前 eva 使用的 RPent baseline 不注册 `vllm_user` planner；本节的最小 registration patch 和可替换 planner snapshot 会补上这个 native 入口。
 
@@ -220,11 +221,12 @@ stdout.log、stderr.log、RPent transcript、audit 和 recipe 都保留在 attem
 
 扩容前先量化瓶颈（远端 vLLM/SAM3 吞吐、本地 CPU/EGL 仿真、evidence
 体积），不要直接加大并发。工具都在 `scripts/` 下，纯逻辑在
-`src/eva_agentic/probing.py`，均有单测覆盖。
+`src/eva_agentic/probing.py`，均有单测覆盖。统一通过 `eva-agentic` 这个
+入口调用：`gen-cases` 生成矩阵，`probe` 跑探针。
 
 先生成固定 case 矩阵（task × seed，避免只用一个种子）：
 
-    ./.venv/bin/python scripts/gen_libero_cases.py \
+    ./.venv/bin/eva-agentic gen-cases \
       --suite libero_object --tasks 0,1,4-6 \
       --seed-base 0 --seed-count 3 \
       --max-episode-steps 500 --out /tmp/libero-matrix.jsonl
@@ -233,8 +235,7 @@ capacity probe 把同一 case 列表以不同并发档各跑成一个独立 run�
 id、各自渲染的 experiment/profile，attempt 互不覆盖），并输出每档
 success/耗时对比：
 
-    scripts/with-rpent-vllm-user-env.sh ./.venv/bin/python \
-      scripts/probe_concurrency.py \
+    scripts/with-rpent-vllm-user-env.sh ./.venv/bin/eva-agentic probe \
       --experiment examples/rpent-vllm-user-libero.probe.experiment.yaml \
       --cases /tmp/libero-matrix.jsonl \
       --frameworks examples/rpent-vllm-user-libero.frameworks.example.yaml \
@@ -247,6 +248,17 @@ RPent audit 的 terminated。探针属于 exploration，不用于正式 evaluati
 
 - `--concurrency` 同时充当 `execution.max_jobs` 与 resource slot 数量
   （slots = 并发数 × 每任务需求）。
+
+结果可视化：`visualize` 聚合 `runs/` 下所有冻结 run 成一个 per-case
+summary（CSV/JSON 为主审计产物），并用纯 Python 生成 SVG 图与一个
+HTML 报告（不引入 matplotlib 等重量依赖）：
+
+    ./.venv/bin/eva-agentic visualize --runs-root runs --out-dir runs/.probe/viz
+
+输出含 `summary.csv`、`summary.json`、`report.html`，以及
+`success_rate.svg`（按任务成功率）、`status_heatmap.svg`（task × seed
+状态）、`duration.svg`（单条耗时，log scale）。聚合逻辑在
+`src/eva_agentic/viz.py`，只读、不覆盖历史 run。
 - 先离线验证配置渲染：加 `--dry-run` 只渲染不跑服务。
 - 定正式规模前先确定“某并发下成功率不下降、不出现超时误判”的安全并发
   数，并核对当前 slots 上限（默认 `gpu: [0]` 会把并发锁成 1）。
@@ -262,11 +274,11 @@ ROOT="$PWD"
 
 UV=/share/bin/uv-x86_64-unknown-linux-gnu/uv
 
-ENV="$ROOT/.envs/eva-rpent-libero"
+ENV="$ROOT/.envs/eva-rpent-vllm-user"
 
 mkdir -p "$ROOT/.envs"
 
-"$UV" venv --python 3.10 "$ENV"
+"$UV" venv --python 3.11 "$ENV"
 
 "$UV" pip install --python "$ENV/bin/python" --no-deps \
   -e "$ROOT/third_party/frameworks/rpent"

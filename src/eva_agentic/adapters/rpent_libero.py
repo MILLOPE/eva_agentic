@@ -78,6 +78,20 @@ class RpentLiberoAdapter:
             "sam3_service": "external",
         }
         if run.exit_code != 0:
+            if _has_unsolved_native_signal(attempt_dir):
+                return (
+                    EpisodeResult(
+                        case_id=case.case_id,
+                        status=OutcomeStatus.TASK_FAILURE,
+                        task_success=False,
+                        error_source="rpent.task",
+                        termination_reason="native RPent reported cell unsolved",
+                        requested_conditions=conditions,
+                        effective_conditions=conditions,
+                        metrics={"native_exit_code": run.exit_code},
+                        evidence_paths=tuple(evidence),
+                    ),
+                )
             return (
                 EpisodeResult(
                     case_id=case.case_id,
@@ -126,6 +140,26 @@ class RpentLiberoAdapter:
                 evidence_paths=tuple(evidence),
             ),
         )
+
+
+_UNSOLVED_SIGNALS = (
+    "recipe: not written (cell unsolved)",
+)
+
+
+def _has_unsolved_native_signal(attempt_dir: Path) -> bool:
+    """Return True when native logs show a normal, non-infra task failure."""
+    for rel in ("stdout.log", "native/run.log"):
+        path = Path(attempt_dir) / rel
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if any(signal in text for signal in _UNSOLVED_SIGNALS):
+            return True
+    return False
 
 
 def _one_case(job: Job):
