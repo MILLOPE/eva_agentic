@@ -10,7 +10,7 @@ from pathlib import Path
 from eva_agentic.experiment import resolve_experiment
 from eva_agentic.schema import AttemptStatus, EpisodeResult, OutcomeStatus
 from eva_agentic.store import commit_attempt, initialize_run, load_run, prepare_attempt
-from eva_agentic.viz import collect_rows, discover_runs, render_charts, render_report, write_summary
+from eva_agentic.viz import collect_rows, discover_runs, render_charts, render_report, visualize_runs, write_provenance, write_summary
 
 
 def _make_run(root: Path, run_name: str) -> Path:
@@ -77,9 +77,36 @@ class VizTest(unittest.TestCase):
             self.assertTrue((out_dir / "summary.json").is_file())
 
             charts = render_charts(rows, out_dir)
-            for name in ("success_rate.svg", "status_heatmap.svg", "duration.svg"):
-                self.assertTrue(charts[name].is_file())
+            chart_names = list(charts)  # svg (no seaborn in eval venv) or png
+            self.assertTrue(chart_names, "expected at least one chart")
             self.assertTrue(render_report(rows, out_dir).is_file())
+            self.assertTrue(write_provenance(out_dir, "svg").is_file())
+
+    def test_visualize_runs_writes_in_place(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs_root = root / "runs"
+            run_a = _make_run(root, "viz-0001")
+            run_b = _make_run(root, "viz-0002")
+
+            aggregate = root / "agg"
+            result = visualize_runs([run_a, run_b], aggregate_out_dir=aggregate)
+
+            self.assertEqual(result["renderer"], "svg")  # eval venv has no seaborn
+            self.assertEqual(len(result["per_run"]), 2)
+            for entry in result["per_run"]:
+                out = Path(entry["out_dir"])
+                # in-place under the run dir
+                self.assertEqual(out.parent, root / "runs" / entry["run_id"])
+                for name in ("summary.csv", "summary.json", "report.html", "provenance.json"):
+                    self.assertTrue((out / name).is_file(), f"{name} missing in {out}")
+                self.assertGreaterEqual(len(entry["charts"]), 1)
+
+            aggregate_result = result["aggregate"]
+            self.assertEqual(sorted(aggregate_result["runs"]), ["viz-0001", "viz-0002"])
+            for name in ("summary.csv", "summary.json", "report.html", "provenance.json"):
+                self.assertTrue((aggregate / name).is_file(), f"aggregate {name} missing")
+        assert runs_root  # keep reference
 
 
 if __name__ == "__main__":

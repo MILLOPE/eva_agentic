@@ -16,7 +16,7 @@ from eva_agentic.runner import run_adapter_job
 from eva_agentic.scheduler import run_jobs
 from eva_agentic.store import initialize_run, load_run
 from eva_agentic.summary import summarize_run
-from eva_agentic.viz import collect_rows, discover_runs, render_report, write_summary
+from eva_agentic.viz import discover_runs, visualize_runs
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -51,10 +51,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     probe.add_argument("--work-dir", default="runs/.probe")
     probe.add_argument("--out")
     probe.add_argument("--dry-run", action="store_true")
-    viz = subcommands.add_parser("visualize")
+    viz = subcommands.add_parser("visualize", help="visualize frozen runs (in-place per run; optional aggregate)")
     viz.add_argument("--runs-root", default="runs", help="directory scanned for frozen run dirs")
     viz.add_argument("--run-dir", action="append", default=[], help="target a specific run dir (repeatable)")
-    viz.add_argument("--out-dir", default="viz-out", help="where summary CSV/JSON + SVG/HTML charts are written")
+    viz.add_argument("--out-dir", default=None, help="optional: ALSO write a combined report across all runs here")
     args = parser.parse_args(argv)
     if args.command == "init":
         run_dir = initialize_run(args.runs_root, load_experiment(args.experiment), args.run_id)
@@ -92,18 +92,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not run_dirs:
             print(f"no frozen runs found under {args.runs_root}")
             return 1
-        rows = collect_rows(run_dirs)
-        out_dir = Path(args.out_dir)
-        write_summary(rows, out_dir / "summary.csv", out_dir / "summary.json")
-        report = render_report(rows, out_dir)
-        print(json.dumps({
-            "runs": sorted({row["run_id"] for row in rows}),
-            "cases": len(rows),
-            "summary_csv": str(out_dir / "summary.csv"),
-            "summary_json": str(out_dir / "summary.json"),
-            "report_html": str(report),
-            "charts": {path.name: str(path) for path in sorted(report.parent.glob("*.svg"))},
-        }, ensure_ascii=False, indent=2))
+        result = visualize_runs(run_dirs, aggregate_out_dir=args.out_dir)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     return _run(args.run_dir, args.frameworks, args.profile, args.lock_root)
 

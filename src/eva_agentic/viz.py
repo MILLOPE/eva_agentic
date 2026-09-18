@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -97,6 +98,71 @@ def write_summary(rows: Sequence[Mapping[str, Any]], out_csv: str | Path, out_js
     json_path.write_text(json.dumps(list(rows), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+
+
+
+def visualize_runs(
+    run_dirs: Iterable[str | Path],
+    aggregate_out_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Visualize frozen runs in place and optionally emit an aggregate report.
+
+    Each run gets its own evidence bundle under ``<run_dir>/viz/`` containing the
+    per-case summary CSV/JSON, the charts, an HTML report and a provenance file.
+    When ``aggregate_out_dir`` is given, a combined report across all runs is also
+    written there (kept separate so per-run evidence travels with its run).
+    """
+    viz_subdir = "viz"
+    mode = rendering_mode()
+    per_run: list[dict[str, Any]] = []
+    combined_rows: list[dict[str, Any]] = []
+    for run_dir in run_dirs:
+        run_dir = Path(run_dir)
+        rows = collect_rows([run_dir])
+        combined_rows.extend(rows)
+        out = run_dir / viz_subdir
+        write_summary(rows, out / "summary.csv", out / "summary.json")
+        report = render_report(rows, out)
+        write_provenance(out, mode)
+        per_run.append({
+            "run_id": run_dir.name,
+            "out_dir": str(out),
+            "cases": len(rows),
+            "report_html": str(report),
+            "charts": sorted(p.name for p in out.glob("*.png")) + sorted(p.name for p in out.glob("*.svg")),
+        })
+    result: dict[str, Any] = {"renderer": mode, "per_run": per_run}
+    if aggregate_out_dir:
+        out = Path(aggregate_out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        write_summary(combined_rows, out / "summary.csv", out / "summary.json")
+        report = render_report(combined_rows, out)
+        write_provenance(out, mode)
+        result["aggregate"] = {
+            "out_dir": str(out),
+            "runs": sorted({row["run_id"] for row in combined_rows}),
+            "cases": len(combined_rows),
+            "report_html": str(report),
+            "charts": sorted(p.name for p in out.glob("*.png")) + sorted(p.name for p in out.glob("*.svg")),
+        }
+    return result
+
+
+def write_provenance(out_dir: str | Path, mode: str) -> Path:
+    """Record how the viz evidence was produced (desensitized, no secrets)."""
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "artifact": "eva-agentic visualize",
+        "renderer": mode,
+        "plot_env": "eva-viz" if mode == "seaborn" else "eva-agentic-eval",
+        "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    path = out / "provenance.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def _case_row(run_id: str, case: Mapping[str, Any], job: Any, attempt: Mapping[str, Any] | None) -> dict[str, Any]:
     task_index = _task_index(case)
     base = {
@@ -153,12 +219,34 @@ def _duration_s(attempt: Mapping[str, Any]) -> float | None:
 
 
 # --------------------------------------------------------------------------- #
-# SVG chart rendering (dependency-free)
+# Chart rendering: seaborn when available, otherwise dependency-free SVG
 # --------------------------------------------------------------------------- #
+def rendering_mode() -> str:
+    """Return the chart renderer in effect for this interpreter ("seaborn"|"svg")."""
+    return "seaborn" if _seaborn_available() else "svg"
+
+
+def _seaborn_available() -> bool:
+    try:
+        import matplotlib  # noqa: F401
+        import numpy  # noqa: F401
+        import pandas  # noqa: F401
+        import seaborn  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 def render_charts(rows: Sequence[Mapping[str, Any]], out_dir: str | Path) -> dict[str, Path]:
-    """Render one SVG per chart into ``out_dir``; returns a {chart_name: path} map."""
+    """Render one chart per metric into ``out_dir``; returns a {chart_name: path} map.
+
+    Uses matplotlib + seaborn when present (dedicated ``eva-viz`` env), falling back to
+    pure-Python SVG so the dependency-free evaluator venv keeps working.
+    """
     directory = Path(out_dir)
     directory.mkdir(parents=True, exist_ok=True)
+    if _seaborn_available():
+        return _render_charts_seaborn(rows, directory)
     charts = {
         "success_rate.svg": _success_rate_svg(rows),
         "status_heatmap.svg": _heatmap_svg(rows),
@@ -172,8 +260,160 @@ def render_charts(rows: Sequence[Mapping[str, Any]], out_dir: str | Path) -> dic
     return paths
 
 
+def _render_charts_seaborn(rows: Sequence[Mapping[str, Any]], directory: Path) -> dict[str, Path]:
+    """Render high-quality PNG charts via matplotlib + seaborn."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from pandas import DataFrame
+
+    sns.set_theme(style="whitegrid", palette="deep")
+    frame = _rows_frame(rows)
+    paths = {
+        "success_rate.png": _sn_success_rate(frame, directory),
+        "status_heatmap.png": _sn_heatmap(frame, directory),
+        "duration.png": _sn_duration(frame, directory),
+    }
+    plt.close("all")
+    return {name: path for name, path in paths.items() if path is not None}
+
+
+def _rows_frame(rows: Sequence[Mapping[str, Any]]):
+    from pandas import DataFrame
+    records = []
+    for row in rows:
+        key = row.get("task_index")
+        if key is None:
+            key = row.get("task_id")
+        records.append({
+            "task": str(key),
+            "seed": row.get("seed"),
+            "status": row.get("status") or "unstarted",
+            "success": row.get("task_success"),
+            "duration_s": row.get("duration_s"),
+        })
+    return DataFrame(records)
+
+
+def _sn_success_rate(frame, directory: Path) -> Path | None:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    if frame.empty:
+        return _blank_png("no cases to plot", directory / "success_rate.png")
+    grouped = frame.groupby("task", as_index=False)["success"].agg(
+        total="count", ok=lambda s: int(s.eq(True).sum()))
+    grouped["rate"] = grouped["ok"] / grouped["total"]
+    ax = sns.barplot(data=grouped, x="task", y="rate", color="#2e8b57")
+    ax.set_ylim(0, 1)
+    ax.set_ylabel("success rate")
+    ax.set_title("per-task success rate")
+    for bar, rate in zip(ax.patches, grouped["rate"]):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
+                f"{rate:.0%}", ha="center", fontsize=9)
+    fig = ax.get_figure()
+    fig.tight_layout()
+    path = directory / "success_rate.png"
+    fig.savefig(path, dpi=140)
+    return path
+
+
+def _sn_heatmap(frame, directory: Path) -> Path | None:
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    if frame.empty:
+        return _blank_png("no cases to plot", directory / "status_heatmap.png")
+    pivot = frame.pivot_table(index="task", columns="seed", values="status", aggfunc="first")
+    present = sorted({str(v) for v in pivot.stack().unique().tolist() if not _isna(v)})
+    statuses = present if present else ["unstarted"]
+    if "unstarted" not in statuses:
+        statuses = statuses + ["unstarted"]
+    usable = {s: STATUS_COLORS.get(s, STATUS_COLORS["unstarted"]) for s in statuses}
+    row_labels = list(pivot.index)
+    seed_labels = list(pivot.columns)
+    codes = {s: i for i, s in enumerate(usable)}
+    values = [
+        [str(pivot.loc[t, s]) if s in pivot.columns and t in pivot.index and not _isna(pivot.loc[t, s]) else "unstarted"
+         for s in seed_labels]
+        for t in row_labels
+    ]
+    matrix = [[codes[v] for v in row] for row in values]
+    cmap = _listed_cmap(list(usable.values()))
+    ax = sns.heatmap(
+        matrix, annot=values, fmt="", cmap=cmap, cbar=False,
+        xticklabels=seed_labels, yticklabels=row_labels,
+        annot_kws={"fontsize": 8},
+    )
+    ax.set_title("task × seed status")
+    ax.set_xlabel("seed")
+    ax.set_ylabel("task")
+    fig = ax.get_figure()
+    fig.tight_layout()
+    path = directory / "status_heatmap.png"
+    fig.savefig(path, dpi=140)
+    return path
+
+
+def _listed_cmap(colors):
+    from matplotlib.colors import ListedColormap
+    return ListedColormap(colors)
+
+
+def _isna(value) -> bool:
+    try:
+        import math
+        return value is None or (isinstance(value, float) and math.isnan(value))
+    except Exception:  # pragma: no cover
+        return value is None
+
+
+def _sn_duration(frame, directory: Path) -> Path | None:
+    import math
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import numpy as np
+    frame = frame.dropna(subset=["duration_s"])
+    frame = frame[frame["duration_s"] > 0]
+    if frame.empty:
+        return _blank_png("no positive durations recorded", directory / "duration.png")
+    ordered = frame.sort_values("duration_s", ascending=False).reset_index(drop=True)
+    ordered["idx"] = ordered.index
+    # Plot log10(duration) on a linear axis: a bar baseline of 0 would be
+    # -inf on a true log y-axis, so we avoid the log axis entirely.
+    ordered["log10"] = ordered["duration_s"].map(lambda v: math.log10(v))
+    ax = sns.barplot(data=ordered, x="idx", y="log10", color="#4a7bb5")
+    tick_values = [10, 30, 100, 300, 1000]
+    tick_positions = [math.log10(v) for v in tick_values]
+    ax.set_yticks(tick_positions)
+    ax.set_yticklabels([str(v) for v in tick_values])
+    ax.set_ylabel("duration (s, log scale)")
+    ax.set_xlabel("case")
+    ax.set_title("per-case duration")
+    ax.tick_params(axis="x", labelbottom=False)
+    fig = ax.get_figure()
+    fig.tight_layout()
+    path = directory / "duration.png"
+    fig.savefig(path, dpi=140)
+    # free the helper array to avoid carrying __array_function__ state
+    del ordered
+    return path
+
+
+def _blank_png(message: str, path: Path) -> Path:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(5, 3))
+    ax.text(0.5, 0.5, message, ha="center", va="center")
+    ax.axis("off")
+    fig.tight_layout()
+    fig.savefig(path, dpi=140)
+    plt.close(fig)
+    return path
+
+
 def render_report(rows: Sequence[Mapping[str, Any]], out_dir: str | Path) -> Path:
-    """Write a standalone HTML dashboard embedding the SVG charts + summary table."""
+    """Write a standalone HTML dashboard embedding the charts + summary table."""
     directory = Path(out_dir)
     directory.mkdir(parents=True, exist_ok=True)
     charts = render_charts(rows, directory)

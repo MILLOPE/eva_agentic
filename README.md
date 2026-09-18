@@ -249,16 +249,25 @@ RPent audit 的 terminated。探针属于 exploration，不用于正式 evaluati
 - `--concurrency` 同时充当 `execution.max_jobs` 与 resource slot 数量
   （slots = 并发数 × 每任务需求）。
 
-结果可视化：`visualize` 聚合 `runs/` 下所有冻结 run 成一个 per-case
-summary（CSV/JSON 为主审计产物），并用纯 Python 生成 SVG 图与一个
-HTML 报告（不引入 matplotlib 等重量依赖）：
+结果可视化：`visualize` 默认把每个冻结 run 的 evidence 就地写入该 run
+自己的 `runs/<run_id>/viz/`（summary CSV/JSON + 图表 + HTML 报告 +
+provenance），让证据随 run 一起留存；也可用 `--out-dir` 额外生成一份
+跨 run 的聚合报告供比较。
 
-    ./.venv/bin/eva-agentic visualize --runs-root runs --out-dir runs/.probe/viz
+优先用专门的绘图环境 `eva-viz`（seaborn/matplotlib，产出高质量 PNG；评估
+用 `.venv` 不加重量依赖）：
 
-输出含 `summary.csv`、`summary.json`、`report.html`，以及
-`success_rate.svg`（按任务成功率）、`status_heatmap.svg`（task × seed
-状态）、`duration.svg`（单条耗时，log scale）。聚合逻辑在
-`src/eva_agentic/viz.py`，只读、不覆盖历史 run。
+    scripts/with-eva-viz-env.sh eva-agentic visualize --runs-root runs
+
+在无 seaborn 的解释器（如 `.venv`）下会回退到纯 Python SVG，复用同一套聚合
+逻辑，保证 eval venv 保持轻量：
+
+    ./.venv/bin/eva-agentic visualize --runs-root runs
+
+输出含 `summary.csv`、`summary.json`、`report.html`、`provenance.json`，
+以及 `success_rate`（按任务成功率）、`status_heatmap`（task × seed 状态）、
+`duration`（单条耗时，log scale）三张图。聚合逻辑在 `src/eva_agentic/viz.py`，
+只读、不覆盖历史 run。
 - 先离线验证配置渲染：加 `--dry-run` 只渲染不跑服务。
 - 定正式规模前先确定“某并发下成功率不下降、不出现超时误判”的安全并发
   数，并核对当前 slots 上限（默认 `gpu: [0]` 会把并发锁成 1）。
