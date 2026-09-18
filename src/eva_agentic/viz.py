@@ -722,7 +722,7 @@ def _render_stresskit(rows: Sequence[Mapping[str, Any]], directory: Path) -> tup
     if metrics["suites"]:
         cells = sorted(metrics["suites"], key=lambda x: (x["suite_id"], x["participant"]), reverse=True)
         fig, ax = plt.subplots(figsize=(7.2, max(3.0, .62 * len(cells) + 1.4)))
-        fig.subplots_adjust(left=.30, right=.97, bottom=.20, top=.86)
+        fig.subplots_adjust(left=.30, right=.97, bottom=.27, top=.86)
         _header_footer(fig, "Planned-trial outcome composition",
                        "each bar = all planned trials for one suite-participant cell",
                        "A complete denominator is retained: success, task failure, timeout, infra, invalid, unstarted.",
@@ -748,8 +748,9 @@ def _render_stresskit(rows: Sequence[Mapping[str, Any]], directory: Path) -> tup
         from matplotlib.patches import Patch
         handles = [Patch(facecolor=style["status_colors"][i], label=STATUS_NAMES[s])
                    for i, s in enumerate(STATUS_LEGEND_ORDER)]
-        fig.legend(handles=handles, ncol=3, loc="lower center", bbox_to_anchor=(.5, .06),
-                   frameon=False, fontsize=7, handlelength=1.2, columnspacing=2)
+        fig.legend(handles=handles, ncol=2, loc="lower center", bbox_to_anchor=(.5, .045),
+                   frameon=False, fontsize=7, handlelength=1.3, handletextpad=.7,
+                   columnspacing=2.8, labelspacing=.7)
         paths["03_outcomes"] = _save_fig(fig, directory / "03_outcomes", pdf, records, "03_outcomes", "outcomes", cells=len(cells))
 
     # --- 05 process evidence: planner rounds and native tool-call load per case ---
