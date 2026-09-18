@@ -1,0 +1,13 @@
+frameworks:
+  - name: rats_libero
+    backend: conda
+    workdir: ../third_party/frameworks/rats
+    command:
+      - python
+      - scripts/run_rats.py
+    resources:
+      gpu: 1
+    env:
+      CAPX_ENV_STACK: libero
+      MUJOCO_GL: egl
+      PYOPENGL_PLATFORM: egl

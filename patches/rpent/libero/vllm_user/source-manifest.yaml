@@ -1,0 +1,37 @@
+schema: eva.rpent-vllm-user-source.v1
+framework:
+  name: rpent
+  eva_path: third_party/frameworks/rpent
+  baseline_revision: 849143b
+  baseline_source: third_party/sources.yaml
+  compatibility_patch: patches/rpent/libero/sam3-rpc-compat.patch
+  compatibility_reason: remote_shared_sam3_uses_legacy_bare_segment_rpc
+planner:
+  package: rpent_vllm_user
+  source_checkout: /share/repos/Rpent-correction
+  source_path: integrations/vllm_user
+  source_revision: d7382752cdb317895f54e825436cfa49c947561b
+  source_subtree_dirty: false
+  snapshot_path: patches/rpent/libero/vllm_user/planner
+shared_runtime:
+  - source_path: rpent/planner/runtime.py
+    snapshot_path: patches/rpent/libero/vllm_user/rpent-runtime/runtime.py
+  - source_path: rpent/planner/liveness.py
+    snapshot_path: patches/rpent/libero/vllm_user/rpent-runtime/liveness.py
+scope:
+  copied_from_correction:
+    - integrations/vllm_user
+    - rpent/planner/runtime.py
+    - rpent/planner/liveness.py
+  excluded:
+    - rpent
+    - robots
+    - third_party
+    - model_assets
+    - generated_caches
+  secret_values_included: false
+notes:
+  - The correction checkout is a read-only migration source, not the runtime framework.
+  - The planner snapshot may be manually replaced, but existing run artifacts are never overwritten.
+  - The SAM3 compatibility patch is independent of the planner snapshot and is only needed when the configured service exposes the legacy RPC name.
+

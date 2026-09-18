@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rpent-vllm-user"
+version = "0.1.0"
+description = "Signed vLLM user-service planner integration for RPent"
+requires-python = ">=3.10,<3.13"
+dependencies = ["rpent==0.0.0", "cryptography>=42"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
+pythonpath = ["src", "../.."]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+isort = {known-first-party = ["rpent", "rpent_vllm_user"]}
+select = ["C", "E", "F", "I", "W", "UP006"]
+ignore = ["C901", "E501"]

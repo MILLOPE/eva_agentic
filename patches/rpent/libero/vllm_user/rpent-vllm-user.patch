@@ -1,0 +1,1698 @@
+diff --git a/rpent/cli/check_llm.py b/rpent/cli/check_llm.py
+index daa6fe3..c20ec88 100644
+--- a/rpent/cli/check_llm.py
++++ b/rpent/cli/check_llm.py
+@@ -56,21 +56,24 @@ def _parser() -> argparse.ArgumentParser:
+         "--planner",
+         default="api",
+         choices=list(CHECK_PLANNERS),
+-        help="LLM backend to check: api | claude_code | codex.",
++        help="LLM backend to check: api | claude_code | codex | vllm_user.",
+     )
+     parser.add_argument(
+         "--model",
+         default=None,
+         help="Model id. For the 'api' planner, prefix the provider "
+         "(e.g. anthropic:claude-opus-4-8, openai:gpt-5.5, "
+-        "openai-chat:glm-5.2). For claude_code/codex this "
++        "openai-chat:glm-5.2). For claude_code/codex/vllm_user this "
+         "overrides the backend default model.",
+     )
+     parser.add_argument(
+         "--base-url",
+         default=None,
+         help=(
+-            "API base URL, for the 'api' planner only. claude_code and codex take their endpoint from ANTHROPIC_BASE_URL / CODEX_BASE_URL instead; passing this flag with either is an error rather than a silent no-op."
++            "API base URL for the 'api' and 'vllm_user' planners. claude_code "
++            "and codex take their endpoint from ANTHROPIC_BASE_URL / "
++            "CODEX_BASE_URL instead; passing this flag with either is an "
++            "error rather than a silent no-op."
+         ),
+     )
+     parser.add_argument(
+@@ -99,6 +102,21 @@ def _remediation(result: LlmCheckResult) -> str:
+     Returns:
+         A one-line hint, or an empty string when none applies.
+     """
++    if result.planner == "vllm_user":
++        if result.status == STATUS_MISSING_API_KEY:
++            return (
++                "Set RPENT_VLLM_KEY_ID and exactly one of "
++                "RPENT_VLLM_PRIVATE_KEY / RPENT_VLLM_SIGNER_URL, then retry."
++            )
++        if result.status == STATUS_MISSING_CONFIG:
++            return (
++                "Set RPENT_VLLM_BASE_URL and RPENT_VLLM_MODEL, then retry."
++            )
++        if result.status == STATUS_SDK_ERROR:
++            return (
++                "Install the local rpent_vllm_user package in the same "
++                "environment as RPent, then retry."
++            )
+     credential = result.credential_env or "the backend's API key"
+     base_url_env = result.base_url_env or "the backend's base URL variable"
+     hints = {
+diff --git a/rpent/cli/main.py b/rpent/cli/main.py
+index 8bdd99a..f6f423f 100644
+--- a/rpent/cli/main.py
++++ b/rpent/cli/main.py
+@@ -131,24 +131,27 @@ def _build_argparser() -> argparse.ArgumentParser:
+     ap.add_argument(
+         "--planner",
+         default="api",
+-        choices=["api", "claude_code", "codex", "task_card"],
+-        help="Planner backend: api | claude_code | codex are LLMs in the "
+-        "loop; task_card replays a recorded plan with no LLM, re-localizing "
+-        "each waypoint's anchor.",
++        choices=["api", "claude_code", "codex", "vllm_user", "task_card"],
++        help="Planner backend: api | claude_code | codex | vllm_user are "
++        "LLMs in the loop; task_card replays a recorded plan with no LLM, "
++        "re-localizing each waypoint's anchor.",
+     )
+     ap.add_argument(
+         "--model",
+         default=None,
+         help="Model id. For the 'api' planner, prefix the provider "
+         "(e.g. anthropic:claude-opus-4-8, openai:gpt-5.5, "
+-        "openai-chat:glm-5.2). For claude_code/codex this "
++        "openai-chat:glm-5.2). For claude_code/codex/vllm_user this "
+         "overrides the backend default model.",
+     )
+     ap.add_argument(
+         "--base-url",
+         default=None,
+         help=(
+-            "API base URL, for the 'api' planner only. claude_code and codex take their endpoint from ANTHROPIC_BASE_URL / CODEX_BASE_URL instead; passing this flag with either is an error rather than a silent no-op."
++            "API base URL for the api and vllm_user planners. claude_code "
++            "and codex take their endpoint from ANTHROPIC_BASE_URL / "
++            "CODEX_BASE_URL instead; passing this flag with either is an "
++            "error rather than a silent no-op."
+         ),
+     )
+     ap.add_argument("--max-turns", type=int, default=100)
+@@ -157,14 +160,14 @@ def _build_argparser() -> argparse.ArgumentParser:
+         "--reasoning-effort",
+         choices=REASONING_EFFORTS,
+         default="none",
+-        help="Planner reasoning effort for api, claude_code, and "
+-        "codex. Higher effort may improve task success rate "
++        help="Planner reasoning effort for api, claude_code, codex, and "
++        "vllm_user. Higher effort may improve task success rate "
+         "but increases runtime. Defaults to none.",
+     )
+     ap.add_argument(
+         "--no-images",
+         action="store_true",
+-        help="Never send image bytes to the model (api planner only). "
++        help="Never send image bytes to the model (api and vllm_user planners). "
+         "Use for text-only models that reject image input "
+         "(e.g. 400 \"message type 'image_url' is not supported\"); "
+         "read_image then returns the image name instead, with a notice.",
+@@ -173,7 +176,7 @@ def _build_argparser() -> argparse.ArgumentParser:
+         "--planner-timeout-s",
+         type=int,
+         default=None,
+-        help="Wall-clock cap for api/claude_code/codex planner runs. "
++        help="Wall-clock cap for api/claude_code/codex/vllm_user planner runs. "
+         "Terminal interactive API/Claude sessions are exempt. "
+         "Defaults to CODEX_TIMEOUT_S (codex only), "
+         "CELL_TIMEOUT_S, or 1200.",
+diff --git a/rpent/planner/base.py b/rpent/planner/base.py
+index 9bca9f2..630ee96 100644
+--- a/rpent/planner/base.py
++++ b/rpent/planner/base.py
+@@ -240,6 +240,30 @@ def build_planner(
+             dashboard_events=dashboard_events,
+             reasoning_effort=reasoning_effort,
+         )
++    if planner_type == "vllm_user":
++        try:
++            from rpent_vllm_user import create_planner
++        except ModuleNotFoundError as exc:
++            if exc.name != "rpent_vllm_user":
++                raise
++            raise RuntimeError(
++                "the 'vllm_user' planner requires the optional "
++                "integrations/vllm_user package"
++            ) from exc
++        timeout_s = planner_timeout_s
++        if timeout_s is None:
++            timeout_s = int(os.environ.get("CELL_TIMEOUT_S", "1200"))
++        return _with_shared_runtime(
++            create_planner(
++                base_url=base_url,
++                model=model,
++                max_tokens=max_tokens,
++                timeout_s=timeout_s,
++                reasoning_effort=reasoning_effort,
++                dashboard_events=dashboard_events,
++                no_images=no_images,
++            )
++        )
+     if planner_type == "task_card":
+         from rpent.planner.task_card import TaskCardPlanner
+ 
+@@ -248,3 +272,10 @@ def build_planner(
+             robot_name=robot_name,
+         )
+     raise ValueError(f"unknown planner_type: {planner_type}")
++
++
++def _with_shared_runtime(planner: Planner) -> Planner:
++    """Apply the provider-neutral runtime to an optional planner backend."""
++    from rpent.planner.runtime import PlannerRuntime
++
++    return PlannerRuntime(inner=planner)
+diff --git a/rpent/planner/check.py b/rpent/planner/check.py
+index 6957cb4..926aeb0 100644
+--- a/rpent/planner/check.py
++++ b/rpent/planner/check.py
+@@ -77,7 +77,7 @@ CHECK_STATUSES = (
+ )
+ 
+ #: Planner backends this module can probe.
+-CHECK_PLANNERS = ("api", "claude_code", "codex")
++CHECK_PLANNERS = ("api", "claude_code", "codex", "vllm_user")
+ 
+ #: Backends whose endpoint comes from an env var, not from ``--base-url``.
+ #: ``build_planner`` forwards ``base_url`` to the api model alone, so both
+@@ -90,7 +90,7 @@ BASE_URL_ENV_BY_PLANNER = {
+ }
+ 
+ #: Diagnostic timeouts, deliberately independent of the 1200s run default.
+-DEFAULT_TIMEOUT_S = {"api": 30, "claude_code": 90, "codex": 90}
++DEFAULT_TIMEOUT_S = {"api": 30, "claude_code": 90, "codex": 90, "vllm_user": 90}
+ 
+ #: Budget for an SDK backend running on a CLI login rather than an env var.
+ #: Shorter than the default because a diagnostic should not hold the terminal
+@@ -153,6 +153,8 @@ _SECRET_ENV_NAMES = (
+     "OPENAI_API_KEY",
+     "CODEX_API_KEY",
+     "RPENT_CODEX_PROVIDER_KEY",
++    "RPENT_VLLM_PRIVATE_KEY",
++    "RPENT_VLLM_SIGNER_TOKEN",
+ )
+ 
+ #: Values shorter than this are too generic to redact without mangling text.
+@@ -286,6 +288,7 @@ def check_llm(request: LlmCheckRequest) -> LlmCheckResult:
+         "api": _check_api,
+         "claude_code": _check_claude_code,
+         "codex": _check_codex,
++        "vllm_user": _check_vllm_user,
+     }[planner]
+ 
+     # The budget is logged where it is resolved: the SDK backends shorten it
+@@ -771,6 +774,146 @@ def _classify_claude_outcome(outcome: _ClaudeProbeOutcome) -> str | None:
+     return None
+ 
+ 
++# ---------------------------------------------------------------------------
++# signed vLLM user-service planner
++# ---------------------------------------------------------------------------
++
++
++def _check_vllm_user(request: LlmCheckRequest) -> LlmCheckResult:
++    """Probe the optional signed vLLM integration with one raw chat request."""
++    model = (request.model or "").strip() or os.environ.get(
++        "RPENT_VLLM_MODEL", "default"
++    )
++    base_url = request.base_url or os.environ.get("RPENT_VLLM_BASE_URL") or None
++    key_present = bool(os.environ.get("RPENT_VLLM_KEY_ID"))
++
++    def _result(status: str, **kwargs: Any) -> LlmCheckResult:
++        return LlmCheckResult(
++            ok=status == STATUS_OK,
++            status=status,
++            planner="vllm_user",
++            model=model,
++            credential_env="RPENT_VLLM_KEY_ID",
++            credential_present=key_present,
++            base_url=base_url,
++            base_url_env="RPENT_VLLM_BASE_URL",
++            **kwargs,
++        )
++
++    try:
++        from rpent_vllm_user import SignedVllmClient, SignedVllmConfig
++    except ImportError as exc:
++        return _result(STATUS_SDK_ERROR, detail=_describe(exc))
++
++    timeout_s = request.resolved_timeout_s()
++    try:
++        config = SignedVllmConfig.from_env(
++            base_url_override=request.base_url,
++            model_override=request.model,
++            timeout_s=timeout_s,
++        )
++        client = SignedVllmClient(config)
++    except ValueError as exc:
++        status = (
++            STATUS_MISSING_API_KEY
++            if any(
++                name in str(exc)
++                for name in (
++                    "RPENT_VLLM_KEY_ID",
++                    "RPENT_VLLM_PRIVATE_KEY",
++                    "RPENT_VLLM_SIGNER_URL",
++                )
++            )
++            else STATUS_MISSING_CONFIG
++        )
++        return _result(status, detail=_describe(exc))
++    except Exception as exc:  # noqa: BLE001 - signing is an integration boundary
++        return _result(_classify_vllm_error(exc), detail=_describe(exc))
++
++    logger.info("probe budget: %ds", timeout_s)
++    started = time.monotonic()
++    deadline = started + timeout_s
++    try:
++        if config.expected_user_id is not None:
++            client.validate_identity(
++                timeout_s=max(deadline - time.monotonic(), 0.001)
++            )
++        remaining_s = deadline - time.monotonic()
++        if remaining_s <= 0:
++            raise TimeoutError(
++                f"the signed vLLM check did not finish within {timeout_s}s"
++            )
++        response = client.chat(
++            messages=[{"role": "user", "content": PROBE_PROMPT}],
++            model=config.model,
++            max_tokens=PROBE_MAX_TOKENS,
++            temperature=0.0,
++            timeout_s=remaining_s,
++        )
++    except Exception as exc:  # noqa: BLE001 - classify at the probe boundary
++        return _result(
++            _classify_vllm_error(exc),
++            detail=_describe(exc),
++            latency_s=round(time.monotonic() - started, 3),
++        )
++
++    latency_s = round(time.monotonic() - started, 3)
++    reply = _vllm_reply(response)
++    if not reply:
++        return _result(
++            STATUS_PROVIDER_ERROR,
++            detail="the signed vLLM service returned no assistant text.",
++            latency_s=latency_s,
++        )
++    return _result(STATUS_OK, reply=reply, latency_s=latency_s)
++
++
++def _vllm_reply(response: Any) -> str:
++    """Extract assistant text from the integration's OpenAI-compatible result."""
++    payload = getattr(response, "raw", None)
++    if not isinstance(payload, dict):
++        return ""
++    choices = payload.get("choices")
++    if not isinstance(choices, list) or not choices:
++        return ""
++    first = choices[0]
++    message = first.get("message") if isinstance(first, dict) else None
++    content = message.get("content") if isinstance(message, dict) else None
++    return content.strip() if isinstance(content, str) else ""
++
++
++def _classify_vllm_error(exc: Exception) -> str:
++    """Classify signed-service configuration, transport, and HTTP failures."""
++    text = f"{type(exc).__name__}: {exc}".lower()
++    if isinstance(exc, (ConnectionError, TimeoutError)) or any(
++        token in text
++        for token in (
++            "connection",
++            "network",
++            "timed out",
++            "timeout",
++            "transport failed",
++            "unreachable",
++            "urlerror",
++        )
++    ):
++        return STATUS_NETWORK_ERROR
++    if any(
++        token in text for token in ("401", "403", "unexpected user_id", "unexpected key_id")
++    ):
++        return STATUS_AUTH_FAILED
++    if "http 400" in text:
++        return STATUS_INVALID_MODEL
++    if any(
++        token in text
++        for token in ("private key", "signer", "rpent_vllm_key_id")
++    ):
++        return STATUS_MISSING_API_KEY
++    if re.search(r"http (404|409|413|429|5\d\d)\b", text):
++        return STATUS_PROVIDER_ERROR
++    return STATUS_SDK_ERROR
++
++
+ # ---------------------------------------------------------------------------
+ # codex planner
+ # ---------------------------------------------------------------------------
+diff --git a/tests/unit_tests/rpent/planner/test_check_contracts.py b/tests/unit_tests/rpent/planner/test_check_contracts.py
+index 5c39c96..297e4a7 100644
+--- a/tests/unit_tests/rpent/planner/test_check_contracts.py
++++ b/tests/unit_tests/rpent/planner/test_check_contracts.py
+@@ -117,7 +117,12 @@ def test_every_status_is_declared_in_the_public_tuple() -> None:
+ 
+ 
+ def test_diagnostic_timeouts_never_inherit_the_run_default() -> None:
+-    assert DEFAULT_TIMEOUT_S == {"api": 30, "claude_code": 90, "codex": 90}
++    assert DEFAULT_TIMEOUT_S == {
++        "api": 30,
++        "claude_code": 90,
++        "codex": 90,
++        "vllm_user": 90,
++    }
+     for planner, expected in DEFAULT_TIMEOUT_S.items():
+         assert LlmCheckRequest(planner=planner).resolved_timeout_s() == expected
+     assert LlmCheckRequest(planner="api", timeout_s=5).resolved_timeout_s() == 5
+--- /dev/null
++++ b/rpent/planner/liveness.py
+@@ -0,0 +1,890 @@
++# Copyright 2026 The RPent Authors.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++
++"""Provider-neutral liveness policy for RPent tool calls.
++
++The policy understands only the common ``Toolkit`` result envelope. Robot
++transitions, camera roles, and recovery motions remain owned by the robot
++Toolkit and are surfaced through its structured ``code`` and ``instruction``
++fields. This keeps model adapters and the shared planner runtime free of
++embodiment-specific rules.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import json
++import math
++import os
++from collections.abc import Mapping, Sequence
++from dataclasses import dataclass, field
++
++ParsedToolCall = tuple[str, str, Mapping[str, object]]
++
++
++@dataclass(slots=True)
++class _ToolOutcome:
++    fingerprint: str
++    repeats: int
++    environment_observation: bool = False
++
++
++@dataclass(slots=True)
++class ToolLoopGuard:
++    """Track repeated tool outcomes and observable environment progress."""
++
++    enabled: bool = True
++    max_identical_errors: int = 3
++    max_consecutive_errors: int = 12
++    max_identical_outcomes: int = 4
++    max_repeated_failure_families: int = 2
++    max_observations_without_action: int = 16
++    max_stagnant_actions: int = 4
++    max_consecutive_identical_actions: int = 2
++    max_equivalent_capped_actions: int = 8
++    state_tolerance: float = 0.005
++    _last_by_call: dict[str, _ToolOutcome] = field(default_factory=dict, init=False)
++    _last_error_by_call: dict[str, _ToolOutcome] = field(
++        default_factory=dict, init=False
++    )
++    _failure_family_repeats: dict[tuple[str, str], int] = field(
++        default_factory=dict, init=False
++    )
++    _failure_family_scopes: dict[tuple[str, str], object] = field(
++        default_factory=dict, init=False
++    )
++    _failed_call_recovery: dict[str, dict[str, object]] = field(
++        default_factory=dict, init=False
++    )
++    _equivalent_capped_actions: dict[str, int] = field(default_factory=dict, init=False)
++    _last_action_call: str | None = field(default=None, init=False)
++    _consecutive_identical_actions: int = field(default=0, init=False)
++    _max_consecutive_identical_actions_seen: int = field(default=0, init=False)
++    total_errors: int = field(default=0, init=False)
++    consecutive_errors: int = field(default=0, init=False)
++    observations_without_action: int = field(default=0, init=False)
++    max_observations_seen: int = field(default=0, init=False)
++    stagnant_actions: int = field(default=0, init=False)
++    state_changes: int = field(default=0, init=False)
++    semantic_feedbacks: int = field(default=0, init=False)
++    loop_feedbacks: int = field(default=0, init=False)
++    _last_step: float | None = field(default=None, init=False)
++    _state_fingerprint: str | None = field(default=None, init=False)
++
++    def __post_init__(self) -> None:
++        for name, value in (
++            ("max_identical_errors", self.max_identical_errors),
++            ("max_consecutive_errors", self.max_consecutive_errors),
++            ("max_identical_outcomes", self.max_identical_outcomes),
++            ("max_repeated_failure_families", self.max_repeated_failure_families),
++            ("max_observations_without_action", self.max_observations_without_action),
++            ("max_stagnant_actions", self.max_stagnant_actions),
++            (
++                "max_consecutive_identical_actions",
++                self.max_consecutive_identical_actions,
++            ),
++            ("max_equivalent_capped_actions", self.max_equivalent_capped_actions),
++        ):
++            if isinstance(value, bool) or not isinstance(value, int):
++                raise TypeError(f"{name} must be an integer")
++            if value < 1:
++                raise ValueError(f"{name} must be positive")
++        if (
++            isinstance(self.state_tolerance, bool)
++            or not isinstance(self.state_tolerance, (int, float))
++            or not math.isfinite(self.state_tolerance)
++            or self.state_tolerance <= 0
++        ):
++            raise ValueError("state_tolerance must be positive")
++
++    def validate_proposal(
++        self,
++        calls: Sequence[ParsedToolCall],
++    ) -> dict[str, object] | None:
++        """Reject an exact deterministic failure or a third unchanged call."""
++        if not self.enabled:
++            return None
++        for index, (_call_id, tool, arguments) in enumerate(calls):
++            call_key = _call_key(tool, arguments)
++            recovery = self._failed_call_recovery.get(call_key)
++            if recovery is not None:
++                feedback = {
++                    "schema": "rpent.planner_repair_feedback.v1",
++                    "stage": "planner_call",
++                    "path": f"/tool_calls/{index}",
++                    "code": "repeated_failed_tool_call",
++                    "expected": recovery["instruction"],
++                    "actual": f"unchanged failed proposal for {tool}",
++                    "repairable": True,
++                }
++                if "suggested_call" in recovery:
++                    feedback["suggested_call"] = recovery["suggested_call"]
++                return feedback
++            if (
++                call_key == self._last_action_call
++                and self._consecutive_identical_actions
++                >= self.max_consecutive_identical_actions
++            ):
++                return {
++                    "schema": "rpent.planner_repair_feedback.v1",
++                    "stage": "planner_call",
++                    "path": f"/tool_calls/{index}",
++                    "code": "repeated_action_without_replan",
++                    "expected": (
++                        "this exact state-changing call has already executed "
++                        f"{self._consecutive_identical_actions} consecutive times "
++                        "without native task success; use the fresh result to "
++                        "choose a materially different action, or finish with "
++                        "status='stuck' when no safe recovery remains"
++                    ),
++                    "actual": f"unchanged action proposal for {tool}",
++                    "repairable": True,
++                }
++            previous = self._last_by_call.get(call_key)
++            if previous is None or previous.repeats < 2:
++                continue
++            return {
++                "schema": "rpent.planner_repair_feedback.v1",
++                "stage": "planner_call",
++                "path": f"/tool_calls/{index}",
++                "code": "repeated_tool_call_no_progress",
++                "expected": (
++                    "use the existing tool result to advance the plan, or call "
++                    "a different tool with materially different arguments"
++                ),
++                "actual": f"third unchanged proposal for {tool}",
++                "repairable": True,
++            }
++        return None
++
++    def observe(
++        self,
++        *,
++        tool: str,
++        arguments: Mapping[str, object],
++        result: Mapping[str, object],
++        result_text: str | None = None,
++        result_fingerprint: str | None = None,
++        failure_scope: object | None = None,
++    ) -> tuple[dict[str, object] | None, str | None]:
++        """Return structured feedback and an optional terminal liveness error."""
++        if result.get("_finish") is True:
++            return None, None
++
++        error = result.get("error")
++        if error:
++            self.total_errors += 1
++            self.consecutive_errors += 1
++        else:
++            self.consecutive_errors = 0
++        if not self.enabled:
++            return None, None
++
++        call_key = _call_key(tool, arguments)
++        outcome = (
++            _failure_outcome(result)
++            if error
++            else result_fingerprint
++            if result_fingerprint is not None
++            else result_text
++            if result_text is not None
++            else dict(result)
++        )
++        fingerprint = _fingerprint(outcome)
++        outcomes = self._last_error_by_call if error else self._last_by_call
++        previous = outcomes.get(call_key)
++        repeats = (
++            previous.repeats + 1
++            if previous and previous.fingerprint == fingerprint
++            else 1
++        )
++        outcomes[call_key] = _ToolOutcome(fingerprint, repeats)
++
++        if error:
++            recovery = _failure_recovery(result)
++            if _is_deterministic_failure(result):
++                self._failed_call_recovery[call_key] = recovery
++            family_key = _failure_family_key(tool, result)
++            family_repeats = self._failure_family_repeats.get(family_key, 0)
++            # Several independent read-only calls can belong to one planner
++            # proposal. Count that proposal once so feedback is visible before
++            # the cross-proposal guard terminates the failure family.
++            if (
++                failure_scope is None
++                or self._failure_family_scopes.get(family_key) != failure_scope
++            ):
++                family_repeats += 1
++                self._failure_family_repeats[family_key] = family_repeats
++                if failure_scope is not None:
++                    self._failure_family_scopes[family_key] = failure_scope
++            feedback: dict[str, object] = {
++                "schema": "rpent.tool_execution_feedback.v1",
++                "stage": "tool_execution",
++                "tool": tool,
++                "error": str(error),
++                "identical_failure_count": repeats,
++                "instruction": recovery["instruction"],
++            }
++            if "suggested_call" in recovery:
++                feedback["suggested_call"] = recovery["suggested_call"]
++            if family_repeats >= self.max_repeated_failure_families:
++                self.semantic_feedbacks += 1
++                feedback.update(
++                    {
++                        "code": "repeated_failure_family",
++                        "failure_family_count": family_repeats,
++                        "instruction": (
++                            "The same semantic failure persists despite changed "
++                            "arguments. Do not retry or reword the same proposal; "
++                            "follow the tool-provided recovery, choose a materially "
++                            "different action, or finish with status='stuck'."
++                        ),
++                    }
++                )
++                if family_repeats > self.max_repeated_failure_families:
++                    self.loop_feedbacks += 1
++                    return feedback, (
++                        "tool loop guard stopped after "
++                        f"{family_repeats} repeated failures in one semantic "
++                        f"failure family for {tool}"
++                    )
++            if repeats >= self.max_identical_errors:
++                self.loop_feedbacks += 1
++                return feedback, (
++                    f"tool loop guard stopped {repeats} identical failures for {tool}"
++                )
++            if self.consecutive_errors >= self.max_consecutive_errors:
++                self.loop_feedbacks += 1
++                return feedback, (
++                    "tool loop guard stopped after "
++                    f"{self.consecutive_errors} consecutive execution errors"
++                )
++            self.loop_feedbacks += 1
++            return feedback, None
++
++        if tool == "reset":
++            self._failure_family_repeats.clear()
++            self._failure_family_scopes.clear()
++        else:
++            self._failure_family_repeats = {
++                key: count
++                for key, count in self._failure_family_repeats.items()
++                if key[0] != tool
++            }
++            self._failure_family_scopes = {
++                key: scope
++                for key, scope in self._failure_family_scopes.items()
++                if key[0] != tool
++            }
++
++        progress_feedback, progress_error = self._observe_progress(
++            tool=tool,
++            arguments=arguments,
++            result=result,
++        )
++        capped_feedback, capped_error = self._observe_equivalent_capped_action(
++            tool=tool,
++            result=result,
++        )
++        feedback = progress_feedback or capped_feedback
++        loop_error = progress_error or capped_error
++        if feedback is not None:
++            self.loop_feedbacks += 1
++            return feedback, loop_error
++
++        if repeats >= 2:
++            feedback = {
++                "schema": "rpent.tool_loop_feedback.v1",
++                "stage": "tool_execution",
++                "tool": tool,
++                "identical_outcome_count": repeats,
++                "instruction": (
++                    "This identical call produced an unchanged result. Use the "
++                    "existing result to advance the plan or choose a different call."
++                ),
++            }
++            self.loop_feedbacks += 1
++            if repeats >= self.max_identical_outcomes:
++                return feedback, (
++                    f"tool loop guard stopped {repeats} identical outcomes for {tool}"
++                )
++            return feedback, None
++        return None, None
++
++    def _observe_progress(
++        self,
++        *,
++        tool: str,
++        arguments: Mapping[str, object],
++        result: Mapping[str, object],
++    ) -> tuple[dict[str, object] | None, str | None]:
++        step = _environment_step(result)
++        previous_state = self._state_fingerprint
++        current_state = _environment_state_fingerprint(
++            result, tolerance=float(self.state_tolerance)
++        )
++        if current_state is not None:
++            self._state_fingerprint = current_state
++        state_changed = (
++            previous_state is not None
++            and current_state is not None
++            and current_state != previous_state
++        )
++        is_action = _is_environment_action(
++            tool=tool,
++            result=result,
++            step=step,
++            previous_step=self._last_step,
++        )
++        if step is not None and (self._last_step is None or step > self._last_step):
++            self._last_step = step
++
++        if is_action:
++            # A mutation makes earlier environment reads stale, even when the
++            # next request uses the same latest-step alias. Static file reads
++            # and action outcomes retain their independent loop protection.
++            self._last_by_call = {
++                key: outcome
++                for key, outcome in self._last_by_call.items()
++                if not outcome.environment_observation
++            }
++            self._failed_call_recovery.clear()
++            self._last_error_by_call.clear()
++            self.observations_without_action = 0
++            progress = _planner_progress(result, source_tool=tool)
++            if progress is not None and progress.get("native_success") is True:
++                self._last_action_call = None
++                self._consecutive_identical_actions = 0
++                self.stagnant_actions = 0
++                if state_changed:
++                    self.state_changes += 1
++                return None, None
++            self._record_action_call(_call_key(tool, arguments))
++            if previous_state is None or current_state is None:
++                self.stagnant_actions = 0
++                return None, None
++            if state_changed:
++                self.stagnant_actions = 0
++                self.state_changes += 1
++                return None, None
++            self.stagnant_actions += 1
++            self.semantic_feedbacks += 1
++            recovery = _result_progress_recovery(result, source_tool=tool)
++            if recovery is None:
++                recovery = {
++                    "instruction": (
++                        "The observable environment state did not measurably "
++                        "change after this action. Re-observe and materially "
++                        "revise the action rather than repeating an equivalent "
++                        "call."
++                    )
++                }
++            self._failed_call_recovery[_call_key(tool, arguments)] = recovery
++            feedback = {
++                "schema": "rpent.semantic_progress_feedback.v1",
++                "stage": "tool_execution",
++                "tool": tool,
++                "unchanged_action_count": self.stagnant_actions,
++                "instruction": recovery["instruction"],
++            }
++            if "suggested_call" in recovery:
++                feedback["suggested_call"] = recovery["suggested_call"]
++            if self.stagnant_actions >= self.max_stagnant_actions:
++                return feedback, (
++                    "tool loop guard stopped after "
++                    f"{self.stagnant_actions} state-unchanged actions"
++                )
++            return feedback, None
++
++        # File and memory tools do not necessarily carry environment evidence.
++        # Only count observations tied to an environment step or state snapshot.
++        if step is None and current_state is None:
++            return None, None
++        self._last_by_call[_call_key(tool, arguments)].environment_observation = True
++        self.observations_without_action += 1
++        self.max_observations_seen = max(
++            self.max_observations_seen, self.observations_without_action
++        )
++        if self.observations_without_action % self.max_observations_without_action:
++            return None, None
++        self.semantic_feedbacks += 1
++        return (
++            {
++                "schema": "rpent.semantic_progress_feedback.v1",
++                "stage": "tool_execution",
++                "tool": tool,
++                "observations_without_action": self.observations_without_action,
++                "instruction": (
++                    "You have gathered many environment observations without "
++                    "changing the environment. Use the decisive evidence for the "
++                    "next safe action, or state what genuinely new evidence is needed."
++                ),
++            },
++            None,
++        )
++
++    def _record_action_call(self, call_key: str) -> None:
++        """Track exact consecutive mutations independently of state noise."""
++        if call_key == self._last_action_call:
++            self._consecutive_identical_actions += 1
++        else:
++            self._last_action_call = call_key
++            self._consecutive_identical_actions = 1
++        self._max_consecutive_identical_actions_seen = max(
++            self._max_consecutive_identical_actions_seen,
++            self._consecutive_identical_actions,
++        )
++
++    def _observe_equivalent_capped_action(
++        self,
++        *,
++        tool: str,
++        result: Mapping[str, object],
++    ) -> tuple[dict[str, object] | None, str | None]:
++        progress = _planner_progress(result, source_tool=tool)
++        if progress is None:
++            return None, None
++        if (
++            progress.get("outcome") != "budget_exhausted"
++            or progress.get("native_success") is True
++        ):
++            return None, None
++        action_family = progress.get("action_family")
++        if not isinstance(action_family, str) or not action_family.strip():
++            return None, None
++        key = " ".join(action_family.casefold().split())
++        count = self._equivalent_capped_actions.get(key, 0) + 1
++        self._equivalent_capped_actions[key] = count
++        if count < 2:
++            return None, None
++        self.semantic_feedbacks += 1
++        feedback = {
++            "schema": "rpent.semantic_progress_feedback.v1",
++            "stage": "tool_execution",
++            "code": "equivalent_capped_action",
++            "action_family": action_family,
++            "equivalent_capped_action_count": count,
++            "instruction": (
++                "This action family again exhausted its execution budget without "
++                "native task success. Rewording the same family is not a different "
++                "strategy; inspect current evidence and change the setup or action "
++                "family before retrying."
++            ),
++        }
++        if count >= self.max_equivalent_capped_actions:
++            return feedback, (
++                "tool loop guard stopped after "
++                f"{count} capped executions for one equivalent learned action"
++            )
++        return feedback, None
++
++    def stats(self) -> dict[str, int]:
++        """Return run-local counters with provider-independent names."""
++        return {
++            "tool_execution_errors": self.total_errors,
++            "loop_feedbacks": self.loop_feedbacks,
++            "max_observations_without_action": self.max_observations_seen,
++            "stagnant_actions": self.stagnant_actions,
++            "state_changes": self.state_changes,
++            "semantic_progress_feedbacks": self.semantic_feedbacks,
++            "max_consecutive_identical_actions_seen": (
++                self._max_consecutive_identical_actions_seen
++            ),
++            "max_equivalent_capped_actions_seen": max(
++                self._equivalent_capped_actions.values(), default=0
++            ),
++        }
++
++    def reset(self) -> None:
++        """Clear all state before a planner solve."""
++        self._last_by_call.clear()
++        self._last_error_by_call.clear()
++        self._failure_family_repeats.clear()
++        self._failure_family_scopes.clear()
++        self._failed_call_recovery.clear()
++        self._equivalent_capped_actions.clear()
++        self._last_action_call = None
++        self._consecutive_identical_actions = 0
++        self._max_consecutive_identical_actions_seen = 0
++        self.total_errors = 0
++        self.consecutive_errors = 0
++        self.observations_without_action = 0
++        self.max_observations_seen = 0
++        self.stagnant_actions = 0
++        self.state_changes = 0
++        self.semantic_feedbacks = 0
++        self.loop_feedbacks = 0
++        self._last_step = None
++        self._state_fingerprint = None
++
++
++def tool_loop_guard_from_env(
++    environ: Mapping[str, str] | None = None,
++) -> ToolLoopGuard:
++    """Build the shared guard, accepting legacy vLLM names as fallbacks."""
++    env = os.environ if environ is None else environ
++    mode = (
++        _env_value(
++            env,
++            "RPENT_PLANNER_LOOP_GUARD_MODE",
++            "RPENT_VLLM_LOOP_GUARD_MODE",
++            default="enabled",
++        )
++        .strip()
++        .lower()
++    )
++    if mode not in {"enabled", "disabled"}:
++        raise ValueError(
++            "RPENT_PLANNER_LOOP_GUARD_MODE must be 'enabled' or 'disabled'"
++        )
++    return ToolLoopGuard(
++        enabled=mode == "enabled",
++        max_identical_errors=_env_int(
++            env,
++            "RPENT_PLANNER_MAX_IDENTICAL_TOOL_ERRORS",
++            "RPENT_VLLM_MAX_IDENTICAL_TOOL_ERRORS",
++            default=3,
++        ),
++        max_consecutive_errors=_env_int(
++            env,
++            "RPENT_PLANNER_MAX_CONSECUTIVE_TOOL_ERRORS",
++            "RPENT_VLLM_MAX_CONSECUTIVE_TOOL_ERRORS",
++            legacy_name="RPENT_VLLM_MAX_TOTAL_TOOL_ERRORS",
++            default=12,
++        ),
++        max_identical_outcomes=_env_int(
++            env,
++            "RPENT_PLANNER_MAX_IDENTICAL_TOOL_OUTCOMES",
++            "RPENT_VLLM_MAX_IDENTICAL_TOOL_OUTCOMES",
++            default=4,
++        ),
++        max_repeated_failure_families=_env_int(
++            env,
++            "RPENT_PLANNER_MAX_REPEATED_FAILURE_FAMILIES",
++            "RPENT_VLLM_MAX_REPEATED_FAILURE_FAMILIES",
++            default=2,
++        ),
++        max_observations_without_action=_env_int(
++            env,
++            "RPENT_PLANNER_MAX_OBSERVATIONS_WITHOUT_ACTION",
++            "RPENT_VLLM_MAX_OBSERVATIONS_WITHOUT_ACTION",
++            default=16,
++        ),
++        max_stagnant_actions=_env_int(
++            env,
++            "RPENT_PLANNER_MAX_STAGNANT_ACTIONS",
++            "RPENT_VLLM_MAX_STAGNANT_ACTIONS",
++            default=4,
++        ),
++        max_consecutive_identical_actions=_env_int(
++            env,
++            "RPENT_PLANNER_MAX_CONSECUTIVE_IDENTICAL_ACTIONS",
++            "RPENT_VLLM_MAX_CONSECUTIVE_IDENTICAL_ACTIONS",
++            default=2,
++        ),
++        max_equivalent_capped_actions=_env_int(
++            env,
++            "RPENT_PLANNER_MAX_EQUIVALENT_CAPPED_ACTIONS",
++            "RPENT_VLLM_MAX_EQUIVALENT_CAPPED_ACTIONS",
++            default=8,
++        ),
++        state_tolerance=_env_float(
++            env,
++            "RPENT_PLANNER_STATE_TOLERANCE",
++            "RPENT_VLLM_STATE_TOLERANCE",
++            default=0.005,
++        ),
++    )
++
++
++def tool_result_fingerprint(result: Mapping[str, object], blocks: object) -> str:
++    """Fingerprint semantic text and images without retaining image payloads."""
++    digest = hashlib.sha256()
++    digest.update(
++        json.dumps(
++            _semantic_tool_value(result),
++            ensure_ascii=False,
++            sort_keys=True,
++            default=str,
++            separators=(",", ":"),
++        ).encode("utf-8")
++    )
++    for block in blocks or ():
++        if not isinstance(block, Mapping) or block.get("type") != "image":
++            continue
++        source = block.get("source")
++        if not isinstance(source, Mapping):
++            continue
++        data = source.get("data")
++        if isinstance(data, str):
++            digest.update(hashlib.sha256(data.encode("ascii")).digest())
++    return digest.hexdigest()
++
++
++def _call_key(tool: str, arguments: Mapping[str, object]) -> str:
++    return json.dumps(
++        {"tool": tool, "arguments": dict(arguments)},
++        ensure_ascii=False,
++        sort_keys=True,
++        separators=(",", ":"),
++        default=str,
++    )
++
++
++def _fingerprint(value: object) -> str:
++    return hashlib.sha256(
++        json.dumps(
++            value,
++            ensure_ascii=False,
++            sort_keys=True,
++            separators=(",", ":"),
++            default=str,
++        ).encode("utf-8")
++    ).hexdigest()
++
++
++def _failure_outcome(result: Mapping[str, object]) -> dict[str, object]:
++    keys = ("error", "code", "reason", "instruction", "fallback")
++    return {key: result[key] for key in keys if result.get(key) is not None}
++
++
++def _failure_family_key(tool: str, result: Mapping[str, object]) -> tuple[str, str]:
++    code = result.get("code")
++    failure = (
++        {"code": code.strip()}
++        if isinstance(code, str) and code.strip()
++        else {"error": str(result.get("error", ""))}
++    )
++    return tool, json.dumps(
++        {"failure": failure},
++        ensure_ascii=False,
++        sort_keys=True,
++        separators=(",", ":"),
++        default=str,
++    )
++
++
++def _failure_recovery(result: Mapping[str, object]) -> dict[str, object]:
++    instruction = result.get("instruction")
++    if not isinstance(instruction, str) or not instruction.strip():
++        fallback = result.get("fallback")
++        if isinstance(fallback, str) and fallback.strip():
++            instruction = f"Follow the tool-provided fallback: {fallback.strip()}"
++        else:
++            instruction = (
++                "Correct the arguments or choose a materially different tool call. "
++                "Do not repeat this unchanged failure."
++            )
++    recovery: dict[str, object] = {"instruction": instruction}
++    suggested = result.get("suggested_call")
++    if isinstance(suggested, Mapping):
++        recovery["suggested_call"] = dict(suggested)
++    return recovery
++
++
++def _is_deterministic_failure(result: Mapping[str, object]) -> bool:
++    code = result.get("code")
++    return isinstance(code, str) and bool(code.strip())
++
++
++def _result_progress_recovery(
++    result: Mapping[str, object],
++    *,
++    source_tool: str,
++) -> dict[str, object] | None:
++    """Project owner-supplied progress guidance without interpreting it."""
++    progress = _planner_progress(result, source_tool=source_tool)
++    instruction = progress.get("instruction") if progress is not None else None
++    if not isinstance(instruction, str) or not instruction.strip():
++        return None
++    recovery: dict[str, object] = {"instruction": instruction}
++    suggested = progress.get("suggested_call")
++    if isinstance(suggested, Mapping):
++        recovery["suggested_call"] = dict(suggested)
++    return recovery
++
++
++def _planner_progress(
++    result: Mapping[str, object], *, source_tool: str
++) -> Mapping[str, object] | None:
++    """Return one current-call common progress envelope, ignoring stale data."""
++    progress = result.get("planner_progress")
++    if not isinstance(progress, Mapping):
++        return None
++    if progress.get("schema") != "rpent.planner_progress.v1":
++        return None
++    if progress.get("source_tool") != source_tool:
++        return None
++    return progress
++
++
++def _environment_step(result: Mapping[str, object]) -> float | None:
++    for candidate in (result, result.get("state")):
++        if not isinstance(candidate, Mapping):
++            continue
++        for key in ("step", "step_idx"):
++            value = candidate.get(key)
++            if (
++                isinstance(value, (int, float))
++                and not isinstance(value, bool)
++                and math.isfinite(value)
++            ):
++                return float(value)
++    return None
++
++
++def _is_environment_action(
++    *,
++    tool: str,
++    result: Mapping[str, object],
++    step: float | None,
++    previous_step: float | None,
++) -> bool:
++    progress = _planner_progress(result, source_tool=tool)
++    if progress is not None and progress.get("outcome") == "observed":
++        # A robot Toolkit may need to persist a fresh observation as a new
++        # EnvState step. The explicit owner projection takes precedence over
++        # step/command heuristics so observation capture is not treated as a
++        # state-changing robot action.
++        return False
++    elapsed = result.get("agent_elapsed_s")
++    if isinstance(elapsed, (int, float)) and not isinstance(elapsed, bool):
++        return True
++    if step is not None and previous_step is not None and step > previous_step:
++        return True
++    command = result.get("command")
++    if not isinstance(command, Mapping):
++        log = result.get("log")
++        command = log.get("command") if isinstance(log, Mapping) else None
++    return isinstance(command, Mapping) and command.get("action") == tool
++
++
++_VOLATILE_STATE_KEYS = {
++    "agent_elapsed_s",
++    "artifacts",
++    "elapsed_s",
++    "images",
++    "log",
++    "native_actions",
++    "policy_actions",
++    "step",
++    "step_idx",
++    "steps_used",
++    "take_action_cnt",
++    "task_language",
++    "view_specs",
++}
++
++
++def _environment_state_fingerprint(
++    result: Mapping[str, object], *, tolerance: float
++) -> str | None:
++    state = result.get("state")
++    snapshot: dict[str, object] = {}
++    if isinstance(state, Mapping) and state:
++        snapshot["state"] = state
++    for key in (
++        "success",
++        "terminated",
++        "truncated",
++    ):
++        if key in result:
++            snapshot[key] = result[key]
++    if not snapshot:
++        return None
++    return _fingerprint(_stable_state(snapshot, tolerance=tolerance))
++
++
++def _stable_state(value: object, *, tolerance: float, key: str = "") -> object:
++    if key in _VOLATILE_STATE_KEYS or "artifact" in key or key.startswith("image"):
++        return None
++    if isinstance(value, Mapping):
++        return {
++            str(item_key): projected
++            for item_key, item_value in value.items()
++            if (
++                projected := _stable_state(
++                    item_value, tolerance=tolerance, key=str(item_key)
++                )
++            )
++            is not None
++        }
++    if isinstance(value, (list, tuple)):
++        return [_stable_state(item, tolerance=tolerance) for item in value]
++    if isinstance(value, float):
++        return round(value / tolerance)
++    return value
++
++
++def _semantic_tool_value(value: object) -> object:
++    if isinstance(value, Mapping):
++        return {
++            key: _semantic_tool_value(item)
++            for key, item in value.items()
++            if not str(key).startswith("_image_")
++            and key not in {"segment_artifact", "overlay_artifact"}
++        }
++    if isinstance(value, (list, tuple)):
++        return [_semantic_tool_value(item) for item in value]
++    return value
++
++
++def _env_value(
++    env: Mapping[str, str],
++    name: str,
++    fallback_name: str,
++    *,
++    default: str,
++) -> str:
++    return env.get(name) or env.get(fallback_name) or default
++
++
++def _env_int(
++    env: Mapping[str, str],
++    name: str,
++    fallback_name: str,
++    *,
++    default: int,
++    legacy_name: str | None = None,
++) -> int:
++    raw = env.get(name) or env.get(fallback_name)
++    if not raw and legacy_name is not None:
++        raw = env.get(legacy_name)
++    if raw is None or not raw.strip():
++        return default
++    try:
++        value = int(raw)
++    except ValueError as exc:
++        raise ValueError(f"{name} must be an integer") from exc
++    if value < 1:
++        raise ValueError(f"{name} must be positive")
++    return value
++
++
++def _env_float(
++    env: Mapping[str, str],
++    name: str,
++    fallback_name: str,
++    *,
++    default: float,
++) -> float:
++    raw = env.get(name) or env.get(fallback_name)
++    if raw is None or not raw.strip():
++        return default
++    try:
++        value = float(raw)
++    except ValueError as exc:
++        raise ValueError(f"{name} must be a number") from exc
++    if not math.isfinite(value) or value <= 0:
++        raise ValueError(f"{name} must be positive")
++    return value
++
++
++__all__ = [
++    "ParsedToolCall",
++    "ToolLoopGuard",
++    "tool_loop_guard_from_env",
++    "tool_result_fingerprint",
++]
+--- /dev/null
++++ b/rpent/planner/runtime.py
+@@ -0,0 +1,321 @@
++# Copyright 2026 The RPent Authors.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++
++"""Shared planner runtime applied above every model backend.
++
++Backends retain ownership of provider transport, streaming, message encoding,
++and SDK-specific cancellation. This wrapper owns provider-neutral observation
++of RPent Toolkit calls and feeds structured liveness feedback through the same
++ToolResult channel used by every backend.
++"""
++
++from __future__ import annotations
++
++import copy
++import queue
++from collections.abc import Callable, Mapping, Sequence
++from typing import Any
++
++from rpent.dashboard.interaction import DashboardInteractionPort
++from rpent.planner.base import Planner, PlannerResult
++from rpent.planner.liveness import (
++    ParsedToolCall,
++    ToolLoopGuard,
++    tool_loop_guard_from_env,
++    tool_result_fingerprint,
++)
++from rpent.tools.toolkit import ToolResult
++
++GuardFactory = Callable[[], ToolLoopGuard]
++
++
++class PlannerRuntimeToolkit:
++    """Apply one run-local liveness policy around a Toolkit-like object."""
++
++    def __init__(self, *, inner: Any, guard: ToolLoopGuard) -> None:
++        if not callable(getattr(inner, "get_tools_spec", None)):
++            raise TypeError("inner must provide get_tools_spec")
++        if not callable(getattr(inner, "execute_tool", None)):
++            raise TypeError("inner must provide execute_tool")
++        if not isinstance(guard, ToolLoopGuard):
++            raise TypeError("guard must be a ToolLoopGuard")
++        self._inner = inner
++        self._guard = guard
++        self._terminal_error: str | None = None
++        self._preflight_rejections = 0
++        self._consecutive_preflight_rejections = 0
++        self._next_proposal_scope = 0
++        self._active_failure_scope: int | None = None
++        self._remaining_proposal_calls = 0
++        self._active_recovery: dict[str, object] | None = None
++        self._recovery_results = 0
++
++    @property
++    def memory(self):
++        return self._inner.memory
++
++    @property
++    def state(self):
++        return self._inner.state
++
++    @property
++    def terminal_error(self) -> str | None:
++        return self._terminal_error
++
++    def get_tools_spec(self) -> list[dict[str, Any]]:
++        return self._inner.get_tools_spec()
++
++    def is_tool_multi_call_safe(self, name: str) -> bool:
++        checker = getattr(self._inner, "is_tool_multi_call_safe", None)
++        return bool(callable(checker) and checker(name))
++
++    def validate_planner_proposal(
++        self,
++        calls: Sequence[ParsedToolCall],
++    ) -> dict[str, object] | None:
++        """Expose the shared preflight to backends that see a whole proposal."""
++        feedback = self._guard.validate_proposal(calls)
++        if feedback is not None:
++            self._active_failure_scope = None
++            self._remaining_proposal_calls = 0
++            return feedback
++        self._next_proposal_scope += 1
++        self._active_failure_scope = self._next_proposal_scope
++        self._remaining_proposal_calls = len(calls)
++        return None
++
++    def execute_tool(self, name: str, input_dict: dict[str, Any]) -> ToolResult:
++        """Dispatch one call and project shared policy feedback into its result."""
++        failure_scope = self._take_failure_scope()
++        if self._terminal_error is not None and name != "finish":
++            return self._result_with_recovery(
++                ToolResult(
++                    name=name,
++                    result={
++                        "error": self._terminal_error,
++                        "code": "planner_loop_stopped",
++                        "planner_loop_error": self._terminal_error,
++                        "instruction": (
++                            "The shared planner runtime has stopped further tool "
++                            "execution. Call finish with status='stuck' or 'failure'."
++                        ),
++                    },
++                )
++            )
++
++        feedback = self._guard.validate_proposal([("runtime-call", name, input_dict)])
++        if feedback is not None:
++            self._preflight_rejections += 1
++            self._consecutive_preflight_rejections += 1
++            payload: dict[str, Any] = {
++                "error": "planner tool call rejected before execution",
++                "code": str(feedback.get("code") or "planner_call_rejected"),
++                "instruction": str(
++                    feedback.get("expected")
++                    or feedback.get("instruction")
++                    or "Choose a materially different tool call."
++                ),
++                "planner_feedback": copy.deepcopy(feedback),
++                "executed": False,
++            }
++            if (
++                self._consecutive_preflight_rejections
++                >= self._guard.max_identical_errors
++            ):
++                self._terminal_error = (
++                    "shared planner runtime stopped after "
++                    f"{self._consecutive_preflight_rejections} consecutive "
++                    "rejected tool proposals"
++                )
++                payload["planner_loop_error"] = self._terminal_error
++            return self._result_with_recovery(ToolResult(name=name, result=payload))
++
++        self._consecutive_preflight_rejections = 0
++        result = self._inner.execute_tool(name, input_dict)
++        if not isinstance(result, ToolResult):
++            raise TypeError("Toolkit.execute_tool must return ToolResult")
++        self._refresh_recovery()
++        result_dict = result.result
++        if not isinstance(result_dict, Mapping):
++            result_dict = {"value": result_dict}
++        feedback, loop_error = self._guard.observe(
++            tool=name,
++            arguments=input_dict,
++            result=result_dict,
++            result_fingerprint=tool_result_fingerprint(
++                result_dict,
++                result.content_blocks,
++            ),
++            failure_scope=failure_scope,
++        )
++        if feedback is None and loop_error is None:
++            return self._result_with_recovery(result)
++
++        payload = dict(result_dict)
++        if feedback is not None:
++            _append_feedback(payload, feedback)
++        if loop_error is not None:
++            self._terminal_error = loop_error
++            payload["planner_loop_error"] = loop_error
++            payload.setdefault("error", loop_error)
++            payload.setdefault("code", "planner_loop_stopped")
++        return self._result_with_recovery(
++            ToolResult(name=name, result=payload, call_id=result.call_id)
++        )
++
++    def _refresh_recovery(self) -> None:
++        """Read current owner state without interpreting environment semantics."""
++        getter = getattr(self._inner, "get_planner_recovery", None)
++        if not callable(getter):
++            return
++        recovery = getter()
++        if recovery is None:
++            self._active_recovery = None
++            return
++        if not isinstance(recovery, Mapping):
++            raise TypeError(
++                "Toolkit.get_planner_recovery must return a mapping or None"
++            )
++        if recovery.get("schema") != "rpent.planner_recovery.v1":
++            raise ValueError("unsupported planner recovery schema")
++        recovery_id = recovery.get("recovery_id")
++        instruction = recovery.get("instruction")
++        if not isinstance(recovery_id, str) or not recovery_id.strip():
++            raise ValueError("planner recovery_id must be non-empty")
++        if not isinstance(instruction, str) or not instruction.strip():
++            raise ValueError("planner recovery instruction must be non-empty")
++        self._active_recovery = copy.deepcopy(dict(recovery))
++
++    def _result_with_recovery(self, result: ToolResult) -> ToolResult:
++        """Project one active recovery obligation into an agent-visible result."""
++        if self._active_recovery is None:
++            return result
++        payload = (
++            dict(result.result)
++            if isinstance(result.result, Mapping)
++            else {"value": result.result}
++        )
++        payload["planner_recovery"] = copy.deepcopy(self._active_recovery)
++        self._recovery_results += 1
++        return ToolResult(name=result.name, result=payload, call_id=result.call_id)
++
++    def _take_failure_scope(self) -> int | None:
++        """Return the active proposal id once for each declared tool call."""
++        if self._remaining_proposal_calls <= 0:
++            return None
++        scope = self._active_failure_scope
++        self._remaining_proposal_calls -= 1
++        if self._remaining_proposal_calls == 0:
++            self._active_failure_scope = None
++        return scope
++
++    def stats(self) -> dict[str, int]:
++        return {
++            **self._guard.stats(),
++            "planner_preflight_rejections": self._preflight_rejections,
++            "planner_loop_stopped": int(self._terminal_error is not None),
++            "planner_recovery_results": self._recovery_results,
++        }
++
++    def cancel_active_and_wait(self) -> None:
++        self._inner.cancel_active_and_wait()
++
++    def raise_if_cancelled(self) -> None:
++        self._inner.raise_if_cancelled()
++
++    def solved(self) -> bool:
++        return self._inner.solved()
++
++    def write_recipe(self, recipe_tag: str) -> str | None:
++        return self._inner.write_recipe(recipe_tag)
++
++    def close(self) -> None:
++        self._inner.close()
++
++
++class PlannerRuntime:
++    """Wrap any Planner with the common Toolkit-call policy."""
++
++    def __init__(
++        self,
++        *,
++        inner: Planner,
++        guard_factory: GuardFactory = tool_loop_guard_from_env,
++    ) -> None:
++        if not callable(getattr(inner, "solve", None)):
++            raise TypeError("inner must implement Planner.solve")
++        if not callable(guard_factory):
++            raise TypeError("guard_factory must be callable")
++        self._inner = inner
++        self._guard_factory = guard_factory
++
++    @property
++    def inner(self) -> Planner:
++        return self._inner
++
++    def solve(
++        self,
++        *,
++        system_prompt: str,
++        user_message: str,
++        toolkit: Any,
++        max_turns: int,
++        input_queue: queue.Queue[str | None] | None = None,
++        dashboard_interaction: DashboardInteractionPort | None = None,
++    ) -> PlannerResult:
++        """Create one isolated policy state and delegate one planner run."""
++        guard = self._guard_factory()
++        guard.reset()
++        runtime_toolkit = PlannerRuntimeToolkit(inner=toolkit, guard=guard)
++        result = self._inner.solve(
++            system_prompt=system_prompt,
++            user_message=user_message,
++            toolkit=runtime_toolkit,
++            max_turns=max_turns,
++            input_queue=input_queue,
++            dashboard_interaction=dashboard_interaction,
++        )
++        if not isinstance(result, PlannerResult):
++            raise TypeError("Planner.solve must return PlannerResult")
++        _merge_runtime_stats(result.stats, runtime_toolkit.stats())
++        result.stats["planner_runtime"] = "shared"
++        if (
++            runtime_toolkit.terminal_error is not None
++            and result.finish_result is None
++            and result.error is None
++        ):
++            result.error = runtime_toolkit.terminal_error
++        return result
++
++
++def _append_feedback(payload: dict[str, Any], feedback: Mapping[str, object]) -> None:
++    existing = payload.get("planner_feedback")
++    projected = copy.deepcopy(dict(feedback))
++    if existing is None:
++        payload["planner_feedback"] = projected
++    elif isinstance(existing, list):
++        payload["planner_feedback"] = [*existing, projected]
++    else:
++        payload["planner_feedback"] = [existing, projected]
++
++
++def _merge_runtime_stats(
++    backend_stats: dict[str, Any], runtime_stats: Mapping[str, int]
++) -> None:
++    """Merge overlapping observations without erasing backend telemetry."""
++    for name, value in runtime_stats.items():
++        existing = backend_stats.get(name)
++        if (
++            isinstance(existing, (int, float))
++            and not isinstance(existing, bool)
++            and isinstance(value, (int, float))
++            and not isinstance(value, bool)
++        ):
++            backend_stats[name] = max(existing, value)
++        else:
++            backend_stats[name] = value
++
++
++__all__ = ["PlannerRuntime", "PlannerRuntimeToolkit"]
+--- /dev/null
++++ b/tests/unit_tests/rpent/planner/test_vllm_user_contracts.py
+@@ -0,0 +1,109 @@
++from __future__ import annotations
++
++import sys
++from types import ModuleType, SimpleNamespace
++
++from rpent.cli.check_llm import _parser as check_parser
++from rpent.cli.main import _build_argparser
++from rpent.dashboard.events import NullDashboardEventSink
++from rpent.planner.base import build_planner
++from rpent.planner.check import LlmCheckRequest, STATUS_OK, check_llm
++from rpent.planner.runtime import PlannerRuntime
++
++
++def test_native_factory_lazily_wraps_vllm_user(monkeypatch, tmp_path) -> None:
++    class MarkerPlanner:
++        def solve(self, **kwargs):
++            raise AssertionError(f"unexpected solve: {kwargs}")
++
++    marker = MarkerPlanner()
++    captured: dict[str, object] = {}
++    fake = ModuleType("rpent_vllm_user")
++
++    def create_planner(**kwargs):
++        captured.update(kwargs)
++        return marker
++
++    fake.create_planner = create_planner
++    monkeypatch.setitem(sys.modules, "rpent_vllm_user", fake)
++
++    result = build_planner(
++        "vllm_user",
++        output_dir=tmp_path,
++        recipe_tag="test",
++        robot_name="libero",
++        base_url="http://vllm.test/v1",
++        model="default",
++        max_tokens=123,
++        planner_timeout_s=45,
++        dashboard_events=NullDashboardEventSink(),
++        no_images=True,
++    )
++
++    assert isinstance(result, PlannerRuntime)
++    assert result.inner is marker
++    assert captured["base_url"] == "http://vllm.test/v1"
++    assert captured["model"] == "default"
++    assert captured["max_tokens"] == 123
++    assert captured["timeout_s"] == 45
++    assert captured["reasoning_effort"] == "none"
++    assert captured["dashboard_events"].enabled is False
++    assert captured["no_images"] is True
++
++
++def test_native_check_uses_signed_vllm_client(monkeypatch) -> None:
++    calls: dict[str, object] = {}
++    fake = ModuleType("rpent_vllm_user")
++
++    class Config:
++        model = "served-model"
++        expected_user_id = None
++
++        @classmethod
++        def from_env(cls, **kwargs):
++            calls["config"] = kwargs
++            return cls()
++
++    class Client:
++        def __init__(self, config):
++            calls["client_config"] = config
++
++        def chat(self, **kwargs):
++            calls["chat"] = kwargs
++            return SimpleNamespace(
++                raw={"choices": [{"message": {"content": "ok"}}]}
++            )
++
++    fake.SignedVllmConfig = Config
++    fake.SignedVllmClient = Client
++    monkeypatch.setitem(sys.modules, "rpent_vllm_user", fake)
++    monkeypatch.setenv("RPENT_VLLM_KEY_ID", "key-id")
++    monkeypatch.setenv("RPENT_VLLM_BASE_URL", "http://vllm.test")
++
++    result = check_llm(
++        LlmCheckRequest(
++            planner="vllm_user",
++            model="served-model",
++            base_url="http://vllm.test",
++            timeout_s=7,
++        )
++    )
++
++    assert result.ok is True
++    assert result.status == STATUS_OK
++    assert result.reply == "ok"
++    assert calls["config"] == {
++        "base_url_override": "http://vllm.test",
++        "model_override": "served-model",
++        "timeout_s": 7,
++    }
++    assert calls["chat"]["model"] == "served-model"
++    assert calls["chat"]["max_tokens"] == 16
++
++
++def test_native_cli_choices_include_vllm_user() -> None:
++    args = _build_argparser().parse_args(["--planner", "vllm_user"])
++    assert args.planner == "vllm_user"
++    check_args = check_parser().parse_args(["--planner", "vllm_user", "--json"])
++    assert check_args.planner == "vllm_user"
++    assert check_args.as_json is True

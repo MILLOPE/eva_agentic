@@ -1,0 +1,34 @@
+frameworks:
+  - name: rpent_libero
+    backend: python
+    workdir: ../third_party/frameworks/rpent
+    command:
+      - -m
+      - rpent.cli.main
+      - --planner
+      - vllm_user
+      - --model
+      - default
+      - --memory-profile
+      - local
+      - --memory-dir
+      - /share/repos/eva_agentic/.assets/rpent-memory/libero-smoke-salad
+      - --max-turns
+      - "80"
+      - --planner-timeout-s
+      - "1200"
+      - --reasoning-effort
+      - high
+    resources:
+      gpu: 1
+    env:
+      LIBERO_TYPE: standard
+      MUJOCO_GL: egl
+      PYOPENGL_PLATFORM: egl
+    provenance:
+      framework_source: third_party/frameworks/rpent
+      framework_revision: 849143bf740a562367345cec0de9ef4657dafd73
+      integration_patch: patches/rpent/libero/vllm_user
+      compatibility_patch: patches/rpent/libero/sam3-rpc-compat.patch
+      planner_source_manifest: patches/rpent/libero/vllm_user/source-manifest.yaml
+      planner_source_revision: d7382752cdb317895f54e825436cfa49c947561b

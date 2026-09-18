@@ -1,0 +1,30 @@
+# Machine-local profiles, credentials, checkpoints, assets, and evaluation output.
+.env.local
+profiles/
+.envs/
+.cache/
+runs/
+checkpoints/
+assets/
+.assets/
+
+# Third-party source checkouts stay local; their revisions are recorded in
+# third_party/sources.yaml.
+/third_party/benchmarks/*
+/third_party/frameworks/*
+/third_party/models/*
+!/third_party/README.md
+!/third_party/sources.yaml
+
+# Local environments, bytecode, and tool caches (never part of the repo).
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+# Stray editor/backup files.
+.gitignore.orig
+
+# Stray .orig editor backups (never part of the repo).
+*.orig

@@ -1,0 +1,26 @@
+# Capacity-probe experiment template (exploration, not an official run).
+# Placeholders are filled by scripts/probe_concurrency.py per concurrency level:
+#   {TAG}        probe tag for run ids / names
+#   {CASES_FILE}   absolute path to the generated case list (JSON-Lines)
+#   {MAX_JOBS}     concurrency level under test
+schema_version: 1
+name: "rpent-vllm-user-libero-probe-{TAG}"
+benchmark: libero
+cases_file: "{CASES_FILE}"
+participants: [rpent_libero]
+protocol:
+  track: native_system
+  phase: exploration
+  memory_policy: frozen
+  scoring: benchmark
+  budget:
+    max_control_steps: 500
+    episode_timeout_s: 1500
+execution:
+  mode: debug
+  max_jobs: "{MAX_JOBS}"
+  max_infrastructure_retries: 0
+  job_timeout_s: 1800
+artifacts:
+  video: all
+  trace: actions

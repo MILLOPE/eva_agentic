@@ -1,0 +1,19 @@
+# Copy this file to an untracked local profile and replace the placeholders.
+# Use scripts/with-rpent-vllm-user-env.sh when running eva.  It imports the
+# RPENT_VLLM_* connection and signing variables from the existing local
+# RPent environment while clearing its correction-workspace Python paths.
+# Keep private key contents, signer tokens, machine paths, and service secrets
+# out of the repository and out of launch.json.
+resource_slots:
+  gpu: [0]
+frameworks:
+  rpent_libero:
+    interpreter: <PROJECT_ROOT>/.envs/eva-rpent-vllm-user/bin/python
+    env:
+      RPENT_VLA_ENDPOINT: 127.0.0.1:18115
+      RPENT_SAM3_ENDPOINT: 127.0.0.1:18114
+      LIBERO_CONFIG_PATH: <PROJECT_ROOT>/.envs/eva-rpent-vllm-user/libero-config
+      LIBERO_ASSET_PATH: <PROJECT_ROOT>/.assets/libero
+      RPENT_REPO_ROOT: <PROJECT_ROOT>/third_party/frameworks/rpent
+      # RPENT_VLLM_BASE_URL, RPENT_VLLM_KEY_ID, RPENT_VLLM_MODEL, and exactly
+      # one signing mechanism come from RPENT_SOURCE_ENV at runtime.

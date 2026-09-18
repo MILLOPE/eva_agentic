@@ -1,0 +1,38 @@
+schema_version: 1
+sources:
+  - id: libero
+    category: benchmarks
+    path: benchmarks/libero
+    url: https://github.com/RLinf/LIBERO.git
+    requested_ref: rpent
+    revision: a832307
+  - id: rpent
+    category: frameworks
+    path: frameworks/rpent
+    url: https://github.com/RLinf/RPent.git
+    requested_ref: 849143b
+    revision: 849143b
+  - id: rats
+    category: frameworks
+    path: frameworks/rats
+    url: local-existing-checkout
+    requested_ref: 1df65a1
+    revision: 1df65a1
+  - id: zetta-embodiment
+    category: frameworks
+    path: frameworks/zetta-embodiment
+    url: local-existing-checkout
+    requested_ref: 04aaa65
+    revision: 04aaa65
+  - id: openpi
+    category: models
+    path: models/openpi
+    url: https://github.com/RLinf/openpi.git
+    requested_ref: rpent
+    revision: a560f4d
+  - id: sam3
+    category: models
+    path: models/sam3
+    url: https://github.com/RLinf/sam3.git
+    requested_ref: main
+    revision: c1f6b1e

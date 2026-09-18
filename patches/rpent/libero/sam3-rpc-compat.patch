@@ -1,0 +1,86 @@
+diff --git a/rpent/robots/components/sam3_client.py b/rpent/robots/components/sam3_client.py
+index 4d15da6..1a14f2d 100644
+--- a/rpent/robots/components/sam3_client.py
++++ b/rpent/robots/components/sam3_client.py
+@@ -24,7 +24,7 @@ from typing import Any
+ import imageio.v2 as imageio
+ import numpy as np
+ 
+-from rpent.utils.rpc import RpcClient
++from rpent.utils.rpc import RpcClient, RpcError
+ 
+ 
+ @dataclass(frozen=True)
+@@ -83,11 +83,23 @@ class Sam3Client:
+         else:
+             body["point"] = [int(point[0]), int(point[1])]
+ 
+-        payload = self._client.call(
+-            "sam3.segment",
+-            kwargs=body,
+-            timeout_s=self._timeout_s,
+-        )
++        try:
++            payload = self._client.call(
++                "sam3.segment",
++                kwargs=body,
++                timeout_s=self._timeout_s,
++            )
++        except RpcError as exc:
++            # Older shared RPent service processes expose the same payload
++            # under the bare method name. Fall back only for method discovery
++            # failures; inference/transport errors must remain visible.
++            if "unknown RPC method" not in str(exc):
++                raise
++            payload = self._client.call(
++                "segment",
++                kwargs=body,
++                timeout_s=self._timeout_s,
++            )
+         return self._decode_result(payload)
+ 
+     @staticmethod
+diff --git a/tests/unit_tests/rpent/robots/components/test_sam3_client_compat.py b/tests/unit_tests/rpent/robots/components/test_sam3_client_compat.py
+new file mode 100644
+index 0000000..e01401e
+--- /dev/null
++++ b/tests/unit_tests/rpent/robots/components/test_sam3_client_compat.py
+@@ -0,0 +1,38 @@
++from __future__ import annotations
++
++from typing import Any
++
++import pytest
++
++from rpent.robots.components.sam3_client import Sam3Client
++from rpent.utils.rpc import RpcError
++
++
++class _LegacySam3Rpc:
++    def __init__(self, error: str | None = None) -> None:
++        self.calls: list[str] = []
++        self.error = error
++
++    def call(self, method: str, *, kwargs: dict[str, Any], timeout_s: float) -> dict[str, Any]:
++        self.calls.append(method)
++        if method == "sam3.segment":
++            message = self.error or "unknown RPC method: 'sam3.segment'"
++            raise RpcError(method, message)
++        return {"found": False, "reason": "legacy stub"}
++
++
++def test_sam3_client_falls_back_to_legacy_bare_method() -> None:
++    rpc = _LegacySam3Rpc()
++    result = Sam3Client(rpc).segment(b"image-bytes", text_prompt="a bottle")
++
++    assert result.found is False
++    assert rpc.calls == ["sam3.segment", "segment"]
++
++
++def test_sam3_client_does_not_mask_non_discovery_errors() -> None:
++    rpc = _LegacySam3Rpc(error="inference failed")
++
++    with pytest.raises(RpcError, match="inference failed"):
++        Sam3Client(rpc).segment(b"image-bytes", text_prompt="a bottle")
++
++    assert rpc.calls == ["sam3.segment"]
