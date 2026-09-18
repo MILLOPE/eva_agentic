@@ -28,3 +28,6 @@ __pycache__/
 
 # Stray .orig editor backups (never part of the repo).
 *.orig
+
+
+temp/

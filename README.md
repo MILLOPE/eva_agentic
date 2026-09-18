@@ -269,9 +269,24 @@ provenance），让证据随 run 一起留存；也可用 `--out-dir` 额外生�
     ./.venv/bin/eva-agentic visualize --runs-root runs
 
 输出含 `summary.csv`、`summary.json`、`report.html`、`provenance.json`，
-以及 `success_rate`（按任务成功率）、`status_heatmap`（task × seed 状态）、
-`duration`（单条耗时，log scale）三张图。聚合逻辑在 `src/eva_agentic/viz.py`，
-只读、不覆盖历史 run。
+以及一套参考风格图（每个图同时导出 PNG/SVG/PDF，并汇总成 `all_figures.pdf`）：
+
+- `00_suite_overview`：按 suite × participant 的“计划试验成功率”矩阵，
+  副数值显示有效结果覆盖率。
+- `01_matrix_<suite>__<participant>`：单次运行的 task × seed 诊断矩阵，
+  每个单元格用固定色 + 字形（S/F/T/I/V/U）标注原生状态，未解决（I/V）与
+  任务失败（F）视觉分离。
+- `02_duration`：按 (suite, participant) 分层的耗时（中位数 + 四分位 +
+  10–90 区间），明确非跨环境速度排名。
+- `03_outcomes`：完整“计划试验构成”堆叠条（success / task_failure /
+  timeout / infra / invalid / unstarted），不静默丢弃缺失结果。
+- `04_tasks_<suite>__<participant>__p<NN>`：任务级成功率，0–100% 同尺度
+  分页（默认每页 24），长任务列表自动分页。
+
+报告嵌入状态图例、coverage 语义说明（valid = success/task_failure/timeout；
+unknown = infra/invalid/unstarted；零有效结果显示 `P` 而非 0%）与紧凑 JSON
+payload，`figure_manifest.json` 记录每张图的来源。聚合逻辑在
+`src/eva_agentic/viz.py`，只读、不覆盖历史 run。
 - 先离线验证配置渲染：加 `--dry-run` 只渲染不跑服务。
 - 定正式规模前先确定“某并发下成功率不下降、不出现超时误判”的安全并发
   数，并核对当前 slots 上限（默认 `gpu: [0]` 会把并发锁成 1）。

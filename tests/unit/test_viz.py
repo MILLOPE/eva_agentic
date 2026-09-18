@@ -10,7 +10,18 @@ from pathlib import Path
 from eva_agentic.experiment import resolve_experiment
 from eva_agentic.schema import AttemptStatus, EpisodeResult, OutcomeStatus
 from eva_agentic.store import commit_attempt, initialize_run, load_run, prepare_attempt
-from eva_agentic.viz import collect_rows, discover_runs, render_charts, render_report, visualize_runs, write_provenance, write_summary
+from eva_agentic.viz import (
+    aggregate_metrics,
+    collect_rows,
+    discover_runs,
+    pages_for,
+    render_charts,
+    render_report,
+    suite_of,
+    visualize_runs,
+    write_provenance,
+    write_summary,
+)
 
 
 def _make_run(root: Path, run_name: str) -> Path:
@@ -107,6 +118,75 @@ class VizTest(unittest.TestCase):
             for name in ("summary.csv", "summary.json", "report.html", "provenance.json"):
                 self.assertTrue((aggregate / name).is_file(), f"aggregate {name} missing")
         assert runs_root  # keep reference
+
+    def test_suite_of_extracts_prefix(self) -> None:
+        self.assertEqual(suite_of({"task_id": "libero_object:2"}), "libero_object")
+        self.assertEqual(suite_of({"task_id": "bare_task"}), "bare_task")
+        self.assertEqual(suite_of({"task_id": None}), "suite")
+
+    def test_aggregate_metrics_coverage_semantics(self) -> None:
+        rows = [
+            _row("libero_object:0", 0, "success", True),
+            _row("libero_object:0", 1, "task_failure", False),
+            _row("libero_object:1", 0, "timeout", False),
+        ]
+        metrics = aggregate_metrics(rows)
+        suite = next(m for m in metrics["suites"] if m["suite_id"] == "libero_object")
+        # valid = decisive outcomes; unknown = infra/invalid/unstarted
+        self.assertEqual(suite["planned"], 3)
+        self.assertEqual(suite["valid"], 3)
+        self.assertEqual(suite["unknown"], 0)
+        self.assertEqual(suite["successes"], 1)
+        self.assertAlmostEqual(suite["yield_pct"], 100.0 / 3)
+        self.assertAlmostEqual(suite["valid_pct"], 100.0)
+        # task-level
+        task0 = next(t for t in metrics["tasks"] if t["task_id"] == "libero_object:0")
+        self.assertEqual(task0["planned"], 2)
+        self.assertEqual(task0["valid"], 2)
+        self.assertEqual(task0["successes"], 1)
+
+    def test_aggregate_metrics_pending_and_unknown(self) -> None:
+        rows = [
+            _row("libero_object:0", 0, "infrastructure_failure", None),
+            _row("libero_object:1", 0, "invalid", None),
+        ]
+        suite = aggregate_metrics(rows)["suites"][0]
+        # no decisive outcome -> valid 0 -> pending, not 0%
+        self.assertEqual(suite["valid"], 0)
+        self.assertEqual(suite["unknown"], 2)
+        self.assertEqual(suite["yield_pct"], 0.0)
+        self.assertEqual(suite["conditional_success_pct"], None)
+        self.assertEqual(suite["valid_pct"], 0.0)
+
+    def test_duration_quantiles_exclude_unstarted(self) -> None:
+        rows = [
+            _row("libero_object:0", 0, "success", True, duration=20.0),
+            _row("libero_object:0", 1, "success", True, duration=40.0),
+            _row("libero_object:1", 0, "unstarted", None, duration=None),
+        ]
+        suite = aggregate_metrics(rows)["suites"][0]
+        self.assertEqual(suite["duration_n"], 2)
+        q = suite["duration_quantiles"]
+        self.assertEqual(q[2], 30.0)  # median
+        # linear interpolation between the two samples, matching numpy quantile defaults
+        self.assertAlmostEqual(q[0], 22.0)  # p10
+        self.assertAlmostEqual(q[4], 38.0)  # p90
+
+    def test_pages_for_splits_and_validates(self) -> None:
+        self.assertEqual(pages_for(list("abcdef"), page_size=2), [["a", "b"], ["c", "d"], ["e", "f"]])
+        with self.assertRaises(ValueError):
+            pages_for(["a"], page_size=0)
+
+
+def _row(task_id, seed, status, success, duration=10.0):
+    from eva_agentic.viz import GLYPHS  # noqa: F401 -- keep import local for parity
+    return {
+        "run_id": "r", "job_id": "j", "case_id": f"{task_id}:s{seed}",
+        "task_id": task_id, "task_index": int(task_id.split(":")[1]),
+        "seed": seed, "participant": "rpent_libero", "attempt": 1,
+        "status": status, "task_success": success, "duration_s": duration,
+        "termination_reason": None, "error_source": None, "success_source": None,
+    }
 
 
 if __name__ == "__main__":
